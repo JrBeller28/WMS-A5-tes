@@ -163,8 +163,7 @@ export function Outbound() {
                     type="number" 
                     value={qty}
                     onChange={e => setQty(e.target.value)}
-                    disabled={!!transaction}
-                    className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 font-mono disabled:opacity-50"
+                    className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 font-mono"
                   />
                   {selectedLocator && options.find(o => o.locatorId === selectedLocator) && (
                      <div className="mt-1 text-xs text-slate-500">
@@ -172,14 +171,14 @@ export function Outbound() {
                      </div>
                   )}
                 </div>
+
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">Memo / Notes</label>
                   <input 
                     type="text" 
                     value={memo}
                     onChange={e => setMemo(e.target.value)}
-                    disabled={!!transaction}
-                    className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 disabled:opacity-50"
+                    className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50"
                   />
                 </div>
 
