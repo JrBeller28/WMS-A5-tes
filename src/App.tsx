@@ -9,6 +9,7 @@ import { Dashboard } from './components/Dashboard';
 import { Inventory } from './components/Inventory';
 import { Inbound } from './components/Inbound';
 import { Outbound } from './components/Outbound';
+import { StockLedger } from './components/StockLedger';
 import { seedDatabase } from './lib/db';
 
 export default function App() {
@@ -26,7 +27,7 @@ export default function App() {
       case 'inventory': return <Inventory />;
       case 'inbound': return <Inbound />;
       case 'outbound': return <Outbound />;
-      case 'ledger': return <Dashboard />; // To be implemented or fallback
+      case 'ledger': return <StockLedger />;
       default: return <Dashboard />;
     }
   };

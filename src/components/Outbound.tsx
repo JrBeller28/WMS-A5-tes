@@ -12,9 +12,17 @@ export function Outbound() {
   const [qty, setQty] = useState('');
   const [memo, setMemo] = useState('');
   const [transaction, setTransaction] = useState<any>(null);
+  const [bookedTransactions, setBookedTransactions] = useState<any[]>([]);
+
+  const refreshBookedTransactions = () => {
+    getTransactions().then(txs => {
+        setBookedTransactions(txs.filter(tx => tx.status === 'BOOKED' && tx.type === 'OUTBOUND'));
+    }).catch(console.error);
+  }
 
   useEffect(() => {
     getProducts().then(setProducts).catch(console.error);
+    refreshBookedTransactions();
   }, []);
 
   useEffect(() => {
@@ -67,6 +75,7 @@ export function Outbound() {
     try {
       await addTransaction(tx);
       setTransaction(tx);
+      refreshBookedTransactions();
     } catch (err: any) {
       alert(err.message || "Error");
     }
@@ -83,6 +92,7 @@ export function Outbound() {
       setTransaction(null);
       setMemo('');
       setQty('');
+      refreshBookedTransactions();
     } catch (e: any) {
       alert(e.message || "Error");
     }
@@ -244,6 +254,68 @@ export function Outbound() {
           </section>
         )}
       </div>
+
+      {bookedTransactions.length > 0 && (
+        <section className="bg-white border border-amber-200 rounded-xl p-8 shadow-sm">
+          <h3 className="text-xl font-bold mb-6 flex items-center gap-2 text-amber-800">
+            <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+            Pending Booked Transactions
+          </h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Time</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">SKU</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Locator</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Qty</th>
+                  <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {bookedTransactions.map(tx => (
+                  <tr key={tx.id} className="hover:bg-amber-50 cursor-pointer transition-colors" onClick={() => {
+                    setSelectedSku(tx.sku);
+                    // need to set options so locator is valid
+                    getTransactions().then(txs => {
+                      const locatorStock: Record<string, number> = {};
+                      for (const t of txs) {
+                        // don't exclude current tx so we can pick it
+                        if (t.status === 'CANCELLED' || t.status === 'PENDING') continue;
+                        if (t.sku === tx.sku) {
+                          if (!locatorStock[t.locatorId]) locatorStock[t.locatorId] = 0;
+                          locatorStock[t.locatorId] += t.qty;
+                        }
+                      }
+                      
+                      // For a pending booked transaction, we need our own qty back in there essentially, 
+                      // actually it doesn't matter much as long as it's in the list
+                      // It will show up anyway since locatorStock will reflect it.
+                      const available = Object.entries(locatorStock)
+                        .filter(([_, q]) => q !== 0) // could be 0 but we want to show it
+                        .map(([locId, q]) => ({ locatorId: locId, qty: q }));
+                        
+                      setOptions(available);
+                      setSelectedLocator(tx.locatorId);
+                      setQty(Math.abs(tx.qty).toString());
+                      setMemo(tx.memo || '');
+                      setTransaction(tx);
+                    });
+                  }}>
+                    <td className="px-6 py-4 text-sm text-slate-600 font-mono">{new Date(tx.timestamp).toLocaleString()}</td>
+                    <td className="px-6 py-4 text-sm font-bold text-slate-900 font-mono tracking-tight">{tx.sku}</td>
+                    <td className="px-6 py-4 text-sm font-mono text-slate-600">{tx.locatorId}</td>
+                    <td className="px-6 py-4 text-sm font-bold text-amber-600 font-mono">{Math.abs(tx.qty)}</td>
+                    <td className="px-6 py-4 text-sm text-right">
+                      <button className="text-amber-700 font-bold hover:underline">Review & Confirm</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
         @media print {

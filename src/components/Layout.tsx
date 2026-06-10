@@ -20,7 +20,7 @@ interface LayoutProps {
 export function Layout({ children, currentTab, onTabChange }: LayoutProps) {
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'inventory', label: 'Inventory', icon: Box },
+    { id: 'inventory', label: 'Stock Overview', icon: Box },
     { id: 'inbound', label: 'Inbound', icon: LogIn },
     { id: 'outbound', label: 'Outbound', icon: LogOut },
     { id: 'ledger', label: 'Stock Ledger', icon: History },
