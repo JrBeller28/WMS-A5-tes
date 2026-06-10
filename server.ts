@@ -144,6 +144,47 @@ app.get('/api/inventory', (req, res) => {
   res.json(inventory);
 });
 
+// GET /api/stats
+app.get('/api/stats', (req, res) => {
+  let totalMaxVolume = 0;
+  for (const loc of db.locators) totalMaxVolume += loc.maxVolumeM3;
+
+  let totalUsedVolume = 0;
+  let activeInbound = 0;
+  let pendingOutbound = 0;
+
+  for (const tx of db.transactions) {
+    if (tx.status === 'CANCELLED') continue;
+    
+    if (tx.status === 'PENDING') {
+      if (tx.type === 'INBOUND') activeInbound++;
+    } else if (tx.status === 'BOOKED' && tx.type === 'OUTBOUND') {
+      // Pending outbound (Booked but not yet Confirmed/Picked)
+      pendingOutbound++;
+    }
+
+    // Physical stock calculation for volume
+    if (tx.status === 'CONFIRMED' || (tx.type === 'OUTBOUND' && tx.status === 'BOOKED')) {
+      const p = db.products.find(x => x.sku === tx.sku);
+      if (p) {
+        if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {
+          totalUsedVolume += (tx.qty * p.volumeM3);
+        } else if (tx.type === 'OUTBOUND' && tx.status === 'CONFIRMED') {
+          totalUsedVolume += (tx.qty * p.volumeM3);
+        }
+      }
+    }
+  }
+
+  const occupancy = totalMaxVolume > 0 ? (totalUsedVolume / totalMaxVolume) * 100 : 0;
+
+  res.json({
+    occupancy: Math.max(0, Math.min(100, Math.round(occupancy * 10) / 10)),
+    inbound: activeInbound, // Transactions waiting to be confirmed 
+    outbound: pendingOutbound
+  });
+});
+
 // GET /api/master/products
 app.get('/api/master/products', (req, res) => {
   res.json(db.products);

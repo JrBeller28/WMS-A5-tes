@@ -5,9 +5,15 @@ import { WarehouseVisualizer } from './WarehouseVisualizer';
 export function Dashboard() {
   const [stats, setStats] = useState<any>(null);
 
+  const fetchStats = () => {
+    fetch('/api/stats')
+      .then(res => res.json())
+      .then(setStats)
+      .catch(console.error);
+  };
+
   useEffect(() => {
-    // In a real app, fetch /api/inventory & /api/ledger
-    setStats({ occupancy: 65, inbound: 12, outbound: 28 });
+    fetchStats();
   }, []);
 
   return (
@@ -17,7 +23,10 @@ export function Dashboard() {
           <h2 className="text-2xl font-bold text-slate-800">Operations Dashboard</h2>
           <p className="text-slate-500 mt-1 text-sm">Real-time inventory and flow status</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition-colors shadow-sm">
+        <button 
+          onClick={fetchStats}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 transition-colors shadow-sm"
+        >
           <RefreshCw className="w-4 h-4" />
           Refresh Data
         </button>
