@@ -154,57 +154,101 @@ export const getPutawayRecommendations = async (sku: string, qty: number) => {
     const requestedVol = product.volumeM3 * qty;
     const zoneLocators = locators.filter(l => l.zone === product.category);
   
-    const locatorUsage: Record<string, number> = {};
-    for (const l of zoneLocators) locatorUsage[l.id] = 0;
-  
-    for (const tx of transactions) {
-      if (tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
-      if (locatorUsage[tx.locatorId] !== undefined) {
-        const p = products.find(x => x.sku === tx.sku);
-        if (p) {
-          if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {
-            locatorUsage[tx.locatorId] += (tx.qty * p.volumeM3);
-          } else if (tx.type === 'OUTBOUND' && tx.status === 'CONFIRMED') {
-            locatorUsage[tx.locatorId] += (tx.qty * p.volumeM3);
+    const getAvailable = (candidates: typeof locators) => {
+      const locatorUsage: Record<string, number> = {};
+      for (const l of candidates) locatorUsage[l.id] = 0;
+    
+      for (const tx of transactions) {
+        if (tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
+        if (locatorUsage[tx.locatorId] !== undefined) {
+          const p = products.find(x => x.sku === tx.sku);
+          if (p) {
+            if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {
+              locatorUsage[tx.locatorId] += (tx.qty * p.volumeM3);
+            } else if (tx.type === 'OUTBOUND' && (tx.status === 'CONFIRMED' || tx.status === 'BOOKED')) {
+              locatorUsage[tx.locatorId] += (tx.qty * p.volumeM3);
+            }
           }
         }
       }
+    
+      return candidates.filter(l => {
+        const currentVol = locatorUsage[l.id] || 0;
+        return (currentVol + requestedVol) <= l.maxVolumeM3;
+      }).sort((a, b) => {
+         if (a.rack.startsWith('FL') && !b.rack.startsWith('FL')) return 1;
+         if (!a.rack.startsWith('FL') && b.rack.startsWith('FL')) return -1;
+         return a.level - b.level;
+      });
+    };
+
+    let preferredRacks: string[] = [];
+    if (product.category === 'FG_PLUMBING') preferredRacks = ['R1'];
+    else if (product.category === 'FG_SMART_WATER') preferredRacks = ['R2'];
+    else if (product.category === 'FG_FITTING') preferredRacks = ['R3'];
+    else if (product.category === 'FG_FILTER') preferredRacks = ['R4', 'R5'];
+    else if (product.category === 'PACKAGING_MATERIALS') preferredRacks = ['R6', 'R7'];
+    else if (product.category === 'ASSEMBLY_KIT') preferredRacks = ['R8'];
+
+    const preferredLocators = locators.filter(l => preferredRacks.includes(l.rack));
+    let availableLocators = getAvailable(preferredLocators);
+
+    if (availableLocators.length === 0) {
+      // Fallback to floating buffer locators for this zone
+      const floatingLocators = locators.filter(l => l.zone === product.category && l.rack.startsWith('FL'));
+      availableLocators = getAvailable(floatingLocators);
+      
+      if (availableLocators.length === 0) {
+        // Fallback to ALL OTHER available non-default locators
+        const otherLocators = locators.filter(l => !preferredRacks.includes(l.rack) && l.zone !== product.category && l.zone !== 'DEFAULT');
+        availableLocators = getAvailable(otherLocators);
+      }
     }
-  
-    const availableLocators = zoneLocators.filter(l => {
-      const currentVol = locatorUsage[l.id] || 0;
-      return (currentVol + requestedVol) <= l.maxVolumeM3;
-    }).sort((a, b) => a.level - b.level);
   
     return availableLocators.slice(0, 5);
 }
 
 export const seedDatabase = async () => {
     try {
-        const pDocs = await getDocs(collection(db, 'products'));
-        if (!pDocs.empty) return; // Already seeded
+        const lDocs = await getDocs(collection(db, 'locators'));
+        if (lDocs.size > 0 && lDocs.size < 400) {
+            for (const doc of lDocs.docs) {
+               await deleteDoc(doc.ref);
+            }
+        } else if (lDocs.size >= 400) {
+            return;
+        }
 
         const locators: Locator[] = [];
         const maxVolumeM3 = 5.4; 
       
         const racksConfig = [
-          { rack: 'R1', prefix: ['A'], cols: 10, zone: 'FG_PLUMBING' as ZoneCategory },
-          { rack: 'R2', prefix: ['B'], cols: 9, zone: 'FG_SMART_WATER' as ZoneCategory },
-          { rack: 'R3', prefix: ['C', 'D'], cols: 9, zone: 'FG_FITTING' as ZoneCategory },
-          { rack: 'R4', prefix: ['E'], cols: 9, zone: 'FG_FITTING' as ZoneCategory },
-          { rack: 'R5', prefix: ['F'], cols: 9, zone: 'FG_FILTER' as ZoneCategory },
-          { rack: 'R6', prefix: ['G'], cols: 9, zone: 'FG_FILTER' as ZoneCategory },
-          { rack: 'R7', prefix: ['H'], cols: 9, zone: 'ASSEMBLY_KIT' as ZoneCategory },
-          { rack: 'R8', prefix: ['I'], cols: 9, zone: 'ASSEMBLY_KIT' as ZoneCategory },
+          { rack: 'FL-A', prefix: ['FL-A'], cols: 5, zone: 'FG_PLUMBING' as ZoneCategory, levels: 2 },
+          { rack: 'FL-B', prefix: ['FL-B'], cols: 5, zone: 'FG_SMART_WATER' as ZoneCategory, levels: 2 },
+          { rack: 'FL-C', prefix: ['FL-C'], cols: 5, zone: 'FG_FITTING' as ZoneCategory, levels: 2 },
+          { rack: 'FL-D', prefix: ['FL-D'], cols: 5, zone: 'FG_FITTING' as ZoneCategory, levels: 2 },
+          { rack: 'FL-E', prefix: ['FL-E'], cols: 5, zone: 'FG_FILTER' as ZoneCategory, levels: 2 },
+          { rack: 'FL-F', prefix: ['FL-F'], cols: 5, zone: 'FG_FILTER' as ZoneCategory, levels: 2 },
+          { rack: 'FL-G', prefix: ['FL-G'], cols: 5, zone: 'PACKAGING_MATERIALS' as ZoneCategory, levels: 2 },
+          { rack: 'FL-H', prefix: ['FL-H'], cols: 5, zone: 'PACKAGING_MATERIALS' as ZoneCategory, levels: 2 },
+          { rack: 'FL-I', prefix: ['FL-I'], cols: 5, zone: 'ASSEMBLY_KIT' as ZoneCategory, levels: 2 },
+          { rack: 'R1', prefix: ['A'], cols: 10, zone: 'FG_PLUMBING' as ZoneCategory, levels: 4 },
+          { rack: 'R2', prefix: ['B'], cols: 9, zone: 'FG_SMART_WATER' as ZoneCategory, levels: 4 },
+          { rack: 'R3', prefix: ['C', 'D'], cols: 9, zone: 'FG_FITTING' as ZoneCategory, levels: 4 },
+          { rack: 'R4', prefix: ['E'], cols: 9, zone: 'FG_FILTER' as ZoneCategory, levels: 4 },
+          { rack: 'R5', prefix: ['F'], cols: 9, zone: 'FG_FILTER' as ZoneCategory, levels: 4 },
+          { rack: 'R6', prefix: ['G'], cols: 9, zone: 'PACKAGING_MATERIALS' as ZoneCategory, levels: 4 },
+          { rack: 'R7', prefix: ['H'], cols: 9, zone: 'PACKAGING_MATERIALS' as ZoneCategory, levels: 4 },
+          { rack: 'R8', prefix: ['I'], cols: 9, zone: 'ASSEMBLY_KIT' as ZoneCategory, levels: 4 },
         ];
       
         for (const rc of racksConfig) {
           for (const prefix of rc.prefix) {
             for (let c = 1; c <= rc.cols; c++) {
-              for (let l = 1; l <= 4; l++) {
+              for (let l = 1; l <= rc.levels; l++) {
                 const colName = `${prefix}${c}`;
                 locators.push({
-                  id: `${rc.rack}-${colName}.${l}`,
+                  id: `${colName}.${l}`,
                   rack: rc.rack,
                   column: colName,
                   level: l,
@@ -225,19 +269,32 @@ export const seedDatabase = async () => {
         ];
       
         const dummyTransactions: Transaction[] = [
-          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 8, locatorId: 'R1-A1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
-          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 10, locatorId: 'R1-A1.2', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
-          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 5, locatorId: 'R1-A2.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 8, locatorId: 'FL-A1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 10, locatorId: 'FL-A1.2', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 5, locatorId: 'FL-A2.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
           
-          { id: uuidv4(), type: 'INBOUND', sku: 'SW-SENS-01', qty: 40, locatorId: 'R2-B1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
-          { id: uuidv4(), type: 'INBOUND', sku: 'SW-SENS-01', qty: 25, locatorId: 'R2-B2.2', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'SW-SENS-01', qty: 40, locatorId: 'FL-B1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'SW-SENS-01', qty: 25, locatorId: 'FL-B2.2', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
           
-          { id: uuidv4(), type: 'INBOUND', sku: 'FT-ELBOW-90', qty: 20, locatorId: 'R3-C1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
-          { id: uuidv4(), type: 'INBOUND', sku: 'FT-ELBOW-90', qty: 15, locatorId: 'R4-E1.3', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'FT-ELBOW-90', qty: 20, locatorId: 'FL-C1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'FT-ELBOW-90', qty: 15, locatorId: 'FL-D1.3', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
           
-          { id: uuidv4(), type: 'INBOUND', sku: 'FL-CARBON', qty: 6, locatorId: 'R5-F1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'FL-CARBON', qty: 6, locatorId: 'FL-E1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
           
-          { id: uuidv4(), type: 'INBOUND', sku: 'AK-MAN-01', qty: 3, locatorId: 'R7-H1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'AK-MAN-01', qty: 3, locatorId: 'FL-I1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 8, locatorId: 'A1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 10, locatorId: 'A1.2', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 5, locatorId: 'A2.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          
+          { id: uuidv4(), type: 'INBOUND', sku: 'SW-SENS-01', qty: 40, locatorId: 'B1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'SW-SENS-01', qty: 25, locatorId: 'B2.2', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          
+          { id: uuidv4(), type: 'INBOUND', sku: 'FT-ELBOW-90', qty: 20, locatorId: 'C1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'FT-ELBOW-90', qty: 15, locatorId: 'D1.3', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          
+          { id: uuidv4(), type: 'INBOUND', sku: 'FL-CARBON', qty: 6, locatorId: 'E1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          
+          { id: uuidv4(), type: 'INBOUND', sku: 'AK-MAN-01', qty: 3, locatorId: 'I1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
         ];
         
         const batch = writeBatch(db);

@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { LogOut, Save, Printer, CheckCircle } from 'lucide-react';
 import { Product } from '../types';
-import { getProducts, getTransactions, addTransaction, updateTransactionStatus } from '../lib/db';
+import { getProducts, getTransactions, addTransaction, updateTransactionStatus, getLocators } from '../lib/db';
 import { v4 as uuidv4 } from 'uuid';
+import { getCurrentUser } from '../lib/auth';
 
 export function Outbound() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [locators, setLocators] = useState<any[]>([]);
   const [selectedSku, setSelectedSku] = useState('');
   const [options, setOptions] = useState<{locatorId: string, qty: number}[]>([]);
   const [selectedLocator, setSelectedLocator] = useState('');
   const [qty, setQty] = useState('');
   const [memo, setMemo] = useState('');
-  const [transaction, setTransaction] = useState<any>(null);
   const [bookedTransactions, setBookedTransactions] = useState<any[]>([]);
 
   const refreshBookedTransactions = () => {
@@ -22,6 +23,7 @@ export function Outbound() {
 
   useEffect(() => {
     getProducts().then(setProducts).catch(console.error);
+    getLocators().then(setLocators).catch(console.error);
     refreshBookedTransactions();
   }, []);
 
@@ -43,7 +45,6 @@ export function Outbound() {
         setOptions(available);
         setSelectedLocator('');
         setQty('');
-        setTransaction(null);
       }).catch(console.error);
     }
   }, [selectedSku]);
@@ -60,13 +61,15 @@ export function Outbound() {
       return;
     }
     
+    const user = getCurrentUser();
+    
     const tx = {
       id: uuidv4(),
       type: 'OUTBOUND' as const,
       sku: selectedSku,
       qty: -pickVal,
       locatorId: selectedLocator,
-      operator: 'Alex Rivera',
+      operator: user ? user.name : 'Unknown User',
       timestamp: new Date().toISOString(),
       status: 'BOOKED' as const,
       memo
@@ -74,7 +77,11 @@ export function Outbound() {
     
     try {
       await addTransaction(tx);
-      setTransaction(tx);
+      setSelectedSku('');
+      setOptions([]);
+      setSelectedLocator('');
+      setMemo('');
+      setQty('');
       refreshBookedTransactions();
     } catch (err: any) {
       alert(err.message || "Error");
@@ -82,16 +89,12 @@ export function Outbound() {
   };
 
   const handleConfirm = async () => {
-    if (!transaction) return;
+    if (bookedTransactions.length === 0) return;
     try {
-      await updateTransactionStatus(transaction.id, 'CONFIRMED');
-      alert('Transaction Confirmed!');
-      // Reset form
-      setSelectedSku('');
-      setOptions([]);
-      setTransaction(null);
-      setMemo('');
-      setQty('');
+      for (const tx of bookedTransactions) {
+        await updateTransactionStatus(tx.id, 'CONFIRMED');
+      }
+      alert('All Manifest Transactions Confirmed!');
       refreshBookedTransactions();
     } catch (e: any) {
       alert(e.message || "Error");
@@ -124,8 +127,7 @@ export function Outbound() {
               <select 
                 value={selectedSku} 
                 onChange={e => setSelectedSku(e.target.value)}
-                disabled={!!transaction}
-                className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 disabled:opacity-50"
+                className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50"
               >
                 <option value="">-- Choose Product --</option>
                 {products.map(p => (
@@ -140,8 +142,8 @@ export function Outbound() {
                 <select 
                   value={selectedLocator} 
                   onChange={e => setSelectedLocator(e.target.value)}
-                  disabled={!!transaction}
-                  className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 font-mono disabled:opacity-50"
+                  
+                  className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 font-mono "
                 >
                   <option value="">-- Select Source Locator --</option>
                   {options.map(o => (
@@ -181,7 +183,6 @@ export function Outbound() {
                   />
                 </div>
 
-                {!transaction && (
                   <div className="pt-4">
                     <button 
                       onClick={handleSaveBook}
@@ -189,17 +190,16 @@ export function Outbound() {
                       className="w-full bg-blue-700 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-blue-800 disabled:opacity-50"
                     >
                       <Save className="w-5 h-5" />
-                      Save & Book
+                      Add to Picking List
                     </button>
                   </div>
-                )}
               </>
             )}
           </div>
         </section>
 
         {/* Print / Confirm Section */}
-        {transaction && (
+        {bookedTransactions.length > 0 && (
           <section className="bg-white border border-slate-200 rounded-xl p-8 shadow-sm flex flex-col justify-between">
             <div>
               <h3 className="text-xl font-bold mb-6 text-slate-800">Booking Summary</h3>
@@ -207,17 +207,32 @@ export function Outbound() {
               <div id="print-area" className="p-6 border-2 border-slate-800 rounded-lg bg-white text-slate-900 printable-content">
                 <div className="text-center mb-6 border-b-2 border-slate-800 pb-4">
                   <h2 className="text-2xl font-black uppercase tracking-widest">GUDANG PSN</h2>
-                  <p className="font-mono text-sm mt-1">OUTBOUND MANIFEST</p>
+                  <p className="font-mono text-sm mt-1">PENGELUARAN BARANG</p>
                 </div>
                 
-                <table className="w-full text-left mb-6 font-mono text-sm">
+                <table className="w-full text-left mb-6 font-mono text-xs">
+                  <thead className="border-b border-slate-800">
+                    <tr>
+                      <th className="py-2">SKU</th>
+                      <th>RACK</th>
+                      <th>LOCATOR</th>
+                      <th>QTY</th>
+                      <th>MEMO</th>
+                    </tr>
+                  </thead>
                   <tbody>
-                    <tr><td className="py-2 font-bold w-32">TX ID:</td><td>{transaction.id}</td></tr>
-                    <tr><td className="py-2 font-bold">DATE:</td><td>{new Date(transaction.timestamp).toLocaleString()}</td></tr>
-                    <tr><td className="py-2 font-bold">SKU:</td><td>{productDetails?.name} ({transaction.sku})</td></tr>
-                    <tr><td className="py-2 font-bold">LOCATOR:</td><td>{transaction.locatorId}</td></tr>
-                    <tr><td className="py-2 font-bold">QUANTITY:</td><td className="text-lg font-black">{Math.abs(transaction.qty)}</td></tr>
-                    <tr><td className="py-2 font-bold">MEMO:</td><td>{transaction.memo || '-'}</td></tr>
+                    {bookedTransactions.map(tx => {
+                      const locInfo = locators.find(l => l.id === tx.locatorId);
+                      return (
+                      <tr key={tx.id} className="border-b border-slate-200 border-dotted">
+                        <td className="py-2">{tx.sku}</td>
+                        <td>{locInfo ? locInfo.rack : '-'}</td>
+                        <td>{tx.locatorId}</td>
+                        <td className="font-black">{Math.abs(tx.qty)}</td>
+                        <td>{tx.memo || '-'}</td>
+                      </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
 
@@ -248,7 +263,7 @@ export function Outbound() {
                 className="w-full bg-emerald-600 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-emerald-700"
               >
                 <CheckCircle className="w-5 h-5" />
-                Admin Confirm Departure
+                Confirm Pick (Manifest)
               </button>
             </div>
           </section>

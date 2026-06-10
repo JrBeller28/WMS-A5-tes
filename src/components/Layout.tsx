@@ -8,16 +8,26 @@ import {
   History, 
   Settings, 
   Bell, 
-  Search 
+  Search,
+  Power
 } from 'lucide-react';
+import { getCurrentUser, logoutUser } from '../lib/auth';
 
 interface LayoutProps {
   children: React.ReactNode;
   currentTab: string;
   onTabChange: (tab: string) => void;
+  onLogout?: () => void;
 }
 
-export function Layout({ children, currentTab, onTabChange }: LayoutProps) {
+export function Layout({ children, currentTab, onTabChange, onLogout }: LayoutProps) {
+  const user = getCurrentUser();
+
+  const handleLogout = () => {
+    logoutUser();
+    if (onLogout) onLogout();
+  };
+
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'inventory', label: 'Stock Overview', icon: Box },
@@ -60,14 +70,19 @@ export function Layout({ children, currentTab, onTabChange }: LayoutProps) {
         </nav>
 
         <div className="p-4 border-t border-slate-200">
-          <div className="flex items-center gap-3 p-2 rounded-lg bg-slate-50 border border-slate-100">
-            <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm">
-              AR
+          <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-sm">
+                {user ? user.name.substring(0, 2).toUpperCase() : 'AR'}
+              </div>
+              <div className="text-left hidden md:block">
+                <p className="text-sm font-bold text-slate-800">{user ? user.name : 'Unknown'}</p>
+                <p className="text-xs text-slate-500">{user ? user.role : 'Guest'}</p>
+              </div>
             </div>
-            <div className="text-left hidden md:block">
-              <p className="text-sm font-bold text-slate-800">Alex Rivera</p>
-              <p className="text-xs text-slate-500">Senior Supervisor</p>
-            </div>
+            <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-600 transition-colors" title="Logout">
+              <Power className="w-4 h-4" />
+            </button>
           </div>
         </div>
       </aside>

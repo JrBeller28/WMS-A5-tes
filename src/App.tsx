@@ -10,15 +10,23 @@ import { Inventory } from './components/Inventory';
 import { Inbound } from './components/Inbound';
 import { Outbound } from './components/Outbound';
 import { StockLedger } from './components/StockLedger';
+import { Login } from './components/Login';
 import { seedDatabase } from './lib/db';
+import { getCurrentUser } from './lib/auth';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [init, setInit] = useState(false);
+  const [user, setUser] = useState<{username: string, role: string, name: string} | null>(null);
 
   useEffect(() => {
+    setUser(getCurrentUser());
     seedDatabase().then(() => setInit(true)).catch(() => setInit(true));
   }, []);
+
+  if (!user) {
+    return <Login onLogin={() => setUser(getCurrentUser())} />;
+  }
 
   const renderContent = () => {
     if (!init) return <div className="p-8 text-center text-slate-500">Initializing Database...</div>;
@@ -33,7 +41,7 @@ export default function App() {
   };
 
   return (
-    <Layout currentTab={currentTab} onTabChange={setCurrentTab}>
+    <Layout currentTab={currentTab} onTabChange={setCurrentTab} onLogout={() => setUser(null)}>
       {renderContent()}
     </Layout>
   );

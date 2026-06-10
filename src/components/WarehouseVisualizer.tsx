@@ -22,23 +22,26 @@ const ZONE_COLORS: Record<ZoneCategory | string, { text: string; bg: string; bor
 };
 
 const RACK_LAYOUT = [
-  { id: 'R1', label: 'Rack R1 (A1 - A10)', zone: 'FG_PLUMBING' },
-  { id: 'R2', label: 'Rack R2 (B1 - B9)', zone: 'FG_SMART_WATER' },
-  { id: 'R3', label: 'Rack R3 (C1 - D9)', zone: 'FG_FITTING' },
-  { id: 'R4', label: 'Rack R4 (E1 - E9)', zone: 'FG_FITTING' },
-  { id: 'R5', label: 'Rack R5 (F1 - F9)', zone: 'FG_FILTER' },
-  { id: 'R6', label: 'Rack R6 (G1 - G9)', zone: 'FG_FILTER' },
-  { id: 'ABP', label: 'Area Bahan Packing', zone: 'PACKAGING_MATERIALS', static: true },
-  { id: 'R7', label: 'Rack R7 (H1 - H9)', zone: 'ASSEMBLY_KIT' },
-  { id: 'R8', label: 'Rack R8 (I1 - I9)', zone: 'ASSEMBLY_KIT' },
-  { id: 'FL', label: 'Floating Buffer Area', zone: 'DEFAULT', static: true },
+  { id: 'FL A-B', label: 'Rack FL-A (A1.1 - A5.4) & Rack FL-B (B1.1 - B5.4)', racks: ['FL-A', 'FL-B'], zone: 'FG_PLUMBING' },
+  { id: 'FL C-D', label: 'Rack FL-C (C1.1 - C5.4) & Rack FL-D (D1.1 - D5.4)', racks: ['FL-C', 'FL-D'], zone: 'FG_FITTING' },
+  { id: 'FL E-F', label: 'Rack FL-E (E1.1 - E5.4) & Rack FL-F (F1.1 - F5.4)', racks: ['FL-E', 'FL-F'], zone: 'FG_FILTER' },
+  { id: 'FL G-H', label: 'Rack FL-G (G1.1 - G5.4) & Rack FL-H (H1.1 - H5.4)', racks: ['FL-G', 'FL-H'], zone: 'PACKAGING_MATERIALS' },
+  { id: 'FL-I', label: 'Rack FL-I (I1.1 - I5.4)', racks: ['FL-I'], zone: 'ASSEMBLY_KIT' },
+  { id: 'R1', label: 'Rack R1 (A1 - A10)', zone: 'FG_PLUMBING', racks: ['R1'] },
+  { id: 'R2', label: 'Rack R2 (B1 - B9)', zone: 'FG_SMART_WATER', racks: ['R2'] },
+  { id: 'R3', label: 'Rack R3 (C1-C9 & D1-D9)', zone: 'FG_FITTING', racks: ['R3'] },
+  { id: 'R4', label: 'Rack R4 (E1 - E9)', zone: 'FG_FILTER', racks: ['R4'] },
+  { id: 'R5', label: 'Rack R5 (F1 - F9)', zone: 'FG_FILTER', racks: ['R5'] },
+  { id: 'R6', label: 'Rack R6 (G1 - G9)', zone: 'PACKAGING_MATERIALS', racks: ['R6'] },
+  { id: 'R7', label: 'Rack R7 (H1 - H9)', zone: 'PACKAGING_MATERIALS', racks: ['R7'] },
+  { id: 'R8', label: 'Rack R8 (I1 - I9)', zone: 'ASSEMBLY_KIT', racks: ['R8'] },
 ];
 
 export function WarehouseVisualizer() {
   const [locators, setLocators] = useState<Locator[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [inventory, setInventory] = useState<any>({});
-  const [selectedRack, setSelectedRack] = useState<string>('R1');
+  const [selectedRack, setSelectedRack] = useState<string>('FL A-B');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -85,10 +88,13 @@ export function WarehouseVisualizer() {
   }, [inventory, locators, products]);
 
   // Derive rack specific data for the Right Panel
-  const rackLocators = locators.filter(l => l.rack === selectedRack);
-  const rackZone = rackLocators.length > 0 ? rackLocators[0].zone : 'DEFAULT';
-  const columns = Array.from(new Set(rackLocators.map(l => l.column))).sort();
-  const levels = [4, 3, 2, 1]; // Top to bottom
+  const selectedConfig = RACK_LAYOUT.find(r => r.id === selectedRack);
+  const rackLocators = locators.filter(l => selectedConfig?.racks.includes(l.rack));
+  const rackZone = selectedConfig?.zone || 'DEFAULT';
+  const columns = Array.from(new Set(rackLocators.map(l => l.column))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const isFloatingRack = selectedRack.startsWith('FL');
+  const maxLevel = isFloatingRack ? 2 : (rackLocators.length > 0 ? Math.max(...rackLocators.map(l => l.level)) : 4);
+  const levels = Array.from({length: maxLevel}, (_, i) => maxLevel - i);
 
   const totalRackVolume = rackLocators.reduce((sum, l) => sum + l.maxVolumeM3, 0);
   const usedRackVolume = rackLocators.reduce((sum, l) => sum + (stats[l.id]?.usedVol || 0), 0);
@@ -225,7 +231,7 @@ export function WarehouseVisualizer() {
                     {/* Columns */}
                     <div className="flex gap-4">
                       {columns.map(col => {
-                        const locId = `${selectedRack}-${col}.${level}`;
+                        const locId = `${col}.${level}`;
                         const stat = stats[locId] || { usedVol: 0, maxVol: 5.4, percentage: 0, items: [] };
                         const isVacant = stat.percentage === 0;
                         const borderColor = getBorderUtilColor(stat.percentage);
@@ -237,7 +243,7 @@ export function WarehouseVisualizer() {
                               
                               {/* Slot ID & % */}
                               <div className="flex justify-between items-start mb-2">
-                                <span className="font-bold text-slate-800 text-sm">{col}.{level}</span>
+                                <span className="font-bold text-slate-800 text-sm">{col.replace('FL-', '')}.{level}</span>
                                 <span className={`text-[10px] font-mono font-bold ${stat.percentage >= 95 ? 'text-rose-600' : 'text-slate-400'}`}>
                                   {stat.percentage}%
                                 </span>

@@ -10,6 +10,7 @@ export function Inventory() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState<Partial<Product>>({ sku: '', name: '', category: 'FG_PLUMBING', volumeM3: 0, uom: 'PCS' });
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState('');
 
   const fetchProducts = () => {
     Promise.all([
@@ -258,13 +259,28 @@ export function Inventory() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-4 mt-6">
+         <h3 className="font-bold text-slate-800">Filter Overview</h3>
+         <select 
+           value={categoryFilter} 
+           onChange={e => setCategoryFilter(e.target.value)}
+           className="p-2 border border-slate-300 rounded text-sm text-slate-800 bg-slate-50 outline-none w-64"
+         >
+           <option value="">Semua Kategori Layout</option>
+           {Array.from(new Set(products.map(p => p.category))).map(cat => (
+             <option key={cat} value={cat}>{cat.replace('_', ' ')}</option>
+           ))}
+         </select>
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden text-slate-800">
         <table className="w-full text-left">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KODE SKU</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">DESKRIPSI NAMA</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KATEGORI LAYOUT SLOT</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">POSISI RAK (SLOT)</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">DIMENSI (VOL/BERAT)</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">AMBANG SAFETY STOCK</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">JUMLAH ON HAND</th>
@@ -272,17 +288,35 @@ export function Inventory() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {products.map(p => {
+            {products.filter(p => categoryFilter === '' || p.category === categoryFilter).map(p => {
               const safetyStock = (p.sku.charCodeAt(0) * 10 + p.sku.charCodeAt(p.sku.length - 1)) % 250 + 20;
-              const onHandQty = inventoryDetails[p.sku]?.totalPhysicalQty || 0;
+              const invData = inventoryDetails[p.sku] || { totalPhysicalQty: 0, locators: {} };
+              const onHandQty = invData.totalPhysicalQty;
               const isSafe = onHandQty >= safetyStock;
               const weightEstimate = (p.volumeM3 * 100).toFixed(1);
+              
+              const activeLocators = Object.entries(invData.locators)
+                 .filter(([_locId, data]: [string, any]) => data.physicalQty > 0)
+                 .map(([locId, data]: [string, any]) => `${locId} (${data.physicalQty})`);
 
               return (
                 <tr key={p.sku} className="hover:bg-slate-50 transition-colors group relative">
                   <td className="px-6 py-4 text-sm font-bold text-blue-700 font-mono tracking-tight cursor-pointer" onClick={() => handleEditClick(p)}>{p.sku}</td>
                   <td className="px-6 py-4 text-sm font-bold text-slate-800">{p.name}</td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-500">{p.category.replace('_', ' ')}</td>
+                  <td className="px-6 py-4">
+                     {activeLocators.length > 0 ? (
+                       <div className="flex flex-wrap gap-1">
+                         {activeLocators.map(loc => (
+                           <span key={loc} className="px-2.5 py-0.5 text-[10px] font-bold font-mono bg-sky-50 text-sky-700 border border-sky-200 rounded-sm">
+                             {loc}
+                           </span>
+                         ))}
+                       </div>
+                     ) : (
+                       <span className="text-xs text-slate-400 font-medium italic">Tidak ada stok fisik</span>
+                     )}
+                  </td>
                   <td className="px-6 py-4">
                     <div className="text-sm font-bold text-slate-700 font-mono">{p.volumeM3} m³</div>
                     <div className="text-xs text-slate-400 mt-0.5">{weightEstimate} Kg</div>
