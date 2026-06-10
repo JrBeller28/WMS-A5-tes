@@ -1,0 +1,260 @@
+import { db } from '../firebase';
+import { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, runTransaction, query, where, writeBatch, serverTimestamp } from 'firebase/firestore';
+import { Locator, Product, Transaction, ZoneCategory } from '../types';
+import { v4 as uuidv4 } from 'uuid';
+
+export const getProducts = async (): Promise<Product[]> => {
+  const snapshot = await getDocs(collection(db, 'products'));
+  const products: Product[] = [];
+  snapshot.forEach(doc => {
+    products.push(doc.data() as Product);
+  });
+  return products;
+};
+
+export const getLocators = async (): Promise<Locator[]> => {
+  const snapshot = await getDocs(collection(db, 'locators'));
+  const locators: Locator[] = [];
+  snapshot.forEach(doc => {
+    locators.push(doc.data() as Locator);
+  });
+  return locators;
+};
+
+export const addProduct = async (product: Product) => {
+  await setDoc(doc(db, 'products', product.sku), product);
+};
+
+export const updateProduct = async (sku: string, data: Partial<Product>) => {
+  await updateDoc(doc(db, 'products', sku), data as any);
+};
+
+export const deleteProduct = async (sku: string) => {
+  await deleteDoc(doc(db, 'products', sku));
+};
+
+export const addProductsBatch = async (products: Product[]) => {
+  const batch = writeBatch(db);
+  for (const p of products) {
+    const ref = doc(db, 'products', p.sku);
+    batch.set(ref, p, { merge: true });
+  }
+  await batch.commit();
+};
+
+export const getTransactions = async (): Promise<Transaction[]> => {
+  const snapshot = await getDocs(collection(db, 'transactions'));
+  const transactions: Transaction[] = [];
+  snapshot.forEach(doc => {
+    transactions.push(doc.data() as Transaction);
+  });
+  // Sort by timestamp desc
+  return transactions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+};
+
+export const addTransaction = async (tx: Transaction) => {
+  await setDoc(doc(db, 'transactions', tx.id), tx);
+};
+
+export const updateTransactionStatus = async (id: string, status: Transaction['status']) => {
+  await updateDoc(doc(db, 'transactions', id), { status });
+};
+
+export const getInventoryStats = async () => {
+    const locators = await getLocators();
+    const transactions = await getTransactions();
+    const products = await getProducts();
+
+    let totalMaxVolume = 0;
+    for (const loc of locators) totalMaxVolume += loc.maxVolumeM3;
+  
+    let totalUsedVolume = 0;
+    let activeInbound = 0;
+    let pendingOutbound = 0;
+  
+    for (const tx of transactions) {
+      if (tx.status === 'CANCELLED') continue;
+      
+      if (tx.status === 'PENDING') {
+        if (tx.type === 'INBOUND') activeInbound++;
+      } else if (tx.status === 'BOOKED' && tx.type === 'OUTBOUND') {
+        pendingOutbound++;
+      }
+  
+      if (tx.status === 'CONFIRMED' || (tx.type === 'OUTBOUND' && tx.status === 'BOOKED')) {
+        const p = products.find(x => x.sku === tx.sku);
+        if (p) {
+          if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {
+            totalUsedVolume += (tx.qty * p.volumeM3);
+          } else if (tx.type === 'OUTBOUND' && tx.status === 'CONFIRMED') {
+            totalUsedVolume += (tx.qty * p.volumeM3);
+          }
+        }
+      }
+    }
+  
+    const occupancy = totalMaxVolume > 0 ? (totalUsedVolume / totalMaxVolume) * 100 : 0;
+  
+    return {
+      occupancy: Math.max(0, Math.min(100, Math.round(occupancy * 10) / 10)),
+      inbound: activeInbound, 
+      outbound: pendingOutbound
+    };
+};
+
+export const getInventoryDetails = async () => {
+    const transactions = await getTransactions();
+    const inventory: Record<string, {
+      totalAvailableQty: number; 
+      totalPhysicalQty: number;
+      locators: Record<string, { availableQty: number; physicalQty: number }> 
+    }> = {};
+    
+    for (const tx of transactions) {
+      if (tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
+      
+      if (!inventory[tx.sku]) {
+        inventory[tx.sku] = { totalAvailableQty: 0, totalPhysicalQty: 0, locators: {} };
+      }
+      if (!inventory[tx.sku].locators[tx.locatorId]) {
+        inventory[tx.sku].locators[tx.locatorId] = { availableQty: 0, physicalQty: 0 };
+      }
+  
+      let availableChange = tx.qty; 
+      let physicalChange = 0;
+  
+      if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {
+        physicalChange = tx.qty;
+      } else if (tx.type === 'OUTBOUND') {
+        if (tx.status === 'CONFIRMED') {
+          physicalChange = tx.qty;
+        } else if (tx.status === 'BOOKED') {
+          physicalChange = 0;
+        }
+      }
+  
+      inventory[tx.sku].totalAvailableQty += availableChange;
+      inventory[tx.sku].totalPhysicalQty += physicalChange;
+      
+      inventory[tx.sku].locators[tx.locatorId].availableQty += availableChange;
+      inventory[tx.sku].locators[tx.locatorId].physicalQty += physicalChange;
+    }
+  
+    return inventory;
+};
+
+export const getPutawayRecommendations = async (sku: string, qty: number) => {
+    const products = await getProducts();
+    const locators = await getLocators();
+    const transactions = await getTransactions();
+
+    const product = products.find(p => p.sku === sku);
+    if (!product) throw new Error("Product not found");
+
+    const requestedVol = product.volumeM3 * qty;
+    const zoneLocators = locators.filter(l => l.zone === product.category);
+  
+    const locatorUsage: Record<string, number> = {};
+    for (const l of zoneLocators) locatorUsage[l.id] = 0;
+  
+    for (const tx of transactions) {
+      if (tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
+      if (locatorUsage[tx.locatorId] !== undefined) {
+        const p = products.find(x => x.sku === tx.sku);
+        if (p) {
+          if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {
+            locatorUsage[tx.locatorId] += (tx.qty * p.volumeM3);
+          } else if (tx.type === 'OUTBOUND' && tx.status === 'CONFIRMED') {
+            locatorUsage[tx.locatorId] += (tx.qty * p.volumeM3);
+          }
+        }
+      }
+    }
+  
+    const availableLocators = zoneLocators.filter(l => {
+      const currentVol = locatorUsage[l.id] || 0;
+      return (currentVol + requestedVol) <= l.maxVolumeM3;
+    }).sort((a, b) => a.level - b.level);
+  
+    return availableLocators.slice(0, 5);
+}
+
+export const seedDatabase = async () => {
+    try {
+        const pDocs = await getDocs(collection(db, 'products'));
+        if (!pDocs.empty) return; // Already seeded
+
+        const locators: Locator[] = [];
+        const maxVolumeM3 = 5.4; 
+      
+        const racksConfig = [
+          { rack: 'R1', prefix: ['A'], cols: 10, zone: 'FG_PLUMBING' as ZoneCategory },
+          { rack: 'R2', prefix: ['B'], cols: 9, zone: 'FG_SMART_WATER' as ZoneCategory },
+          { rack: 'R3', prefix: ['C', 'D'], cols: 9, zone: 'FG_FITTING' as ZoneCategory },
+          { rack: 'R4', prefix: ['E'], cols: 9, zone: 'FG_FITTING' as ZoneCategory },
+          { rack: 'R5', prefix: ['F'], cols: 9, zone: 'FG_FILTER' as ZoneCategory },
+          { rack: 'R6', prefix: ['G'], cols: 9, zone: 'FG_FILTER' as ZoneCategory },
+          { rack: 'R7', prefix: ['H'], cols: 9, zone: 'ASSEMBLY_KIT' as ZoneCategory },
+          { rack: 'R8', prefix: ['I'], cols: 9, zone: 'ASSEMBLY_KIT' as ZoneCategory },
+        ];
+      
+        for (const rc of racksConfig) {
+          for (const prefix of rc.prefix) {
+            for (let c = 1; c <= rc.cols; c++) {
+              for (let l = 1; l <= 4; l++) {
+                const colName = `${prefix}${c}`;
+                locators.push({
+                  id: `${rc.rack}-${colName}.${l}`,
+                  rack: rc.rack,
+                  column: colName,
+                  level: l,
+                  zone: rc.zone,
+                  maxVolumeM3
+                });
+              }
+            }
+          }
+        }
+      
+        const products: Product[] = [
+          { sku: 'PB-PIPE-PVC', name: 'Plumbing PVC Pipe 4"', category: 'FG_PLUMBING', volumeM3: 0.5, uom: 'PCS' },
+          { sku: 'SW-SENS-01', name: 'Smart Flow Sensor', category: 'FG_SMART_WATER', volumeM3: 0.1, uom: 'PCS' },
+          { sku: 'FT-ELBOW-90', name: 'Brass Elbow 90', category: 'FG_FITTING', volumeM3: 0.2, uom: 'PCS' },
+          { sku: 'FL-CARBON', name: 'Carbon Filter Unit', category: 'FG_FILTER', volumeM3: 0.8, uom: 'SET' },
+          { sku: 'AK-MAN-01', name: 'Manufacture Kit 01', category: 'ASSEMBLY_KIT', volumeM3: 1.5, uom: 'BOX' },
+        ];
+      
+        const dummyTransactions: Transaction[] = [
+          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 8, locatorId: 'R1-A1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 10, locatorId: 'R1-A1.2', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'PB-PIPE-PVC', qty: 5, locatorId: 'R1-A2.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          
+          { id: uuidv4(), type: 'INBOUND', sku: 'SW-SENS-01', qty: 40, locatorId: 'R2-B1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'SW-SENS-01', qty: 25, locatorId: 'R2-B2.2', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          
+          { id: uuidv4(), type: 'INBOUND', sku: 'FT-ELBOW-90', qty: 20, locatorId: 'R3-C1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'FT-ELBOW-90', qty: 15, locatorId: 'R4-E1.3', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          
+          { id: uuidv4(), type: 'INBOUND', sku: 'FL-CARBON', qty: 6, locatorId: 'R5-F1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          
+          { id: uuidv4(), type: 'INBOUND', sku: 'AK-MAN-01', qty: 3, locatorId: 'R7-H1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+        ];
+        
+        const batch = writeBatch(db);
+        
+        for (const loc of locators) {
+          batch.set(doc(db, 'locators', loc.id), loc);
+        }
+        for (const p of products) {
+            batch.set(doc(db, 'products', p.sku), p);
+        }
+        for (const tx of dummyTransactions) {
+            batch.set(doc(db, 'transactions', tx.id), tx);
+        }
+
+        await batch.commit();
+
+    } catch (err) {
+        console.error("Failed to seed db", err);
+    }
+}

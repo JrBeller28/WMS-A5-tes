@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { LogOut, Save, Printer, CheckCircle } from 'lucide-react';
 import { Product } from '../types';
+import { getProducts, getTransactions, addTransaction, updateTransactionStatus } from '../lib/db';
+import { v4 as uuidv4 } from 'uuid';
 
 export function Outbound() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -12,53 +14,68 @@ export function Outbound() {
   const [transaction, setTransaction] = useState<any>(null);
 
   useEffect(() => {
-    fetch('/api/master/products')
-      .then(r => r.json())
-      .then(setProducts);
+    getProducts().then(setProducts).catch(console.error);
   }, []);
 
   useEffect(() => {
     if (selectedSku) {
-      fetch(`/api/outbound/options?sku=${selectedSku}`)
-        .then(r => r.json())
-        .then(data => {
-          setOptions(data.available || []);
-          setSelectedLocator('');
-          setQty('');
-          setTransaction(null);
-        });
+      getTransactions().then(txs => {
+        const locatorStock: Record<string, number> = {};
+        for (const tx of txs) {
+          if (tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
+          if (tx.sku === selectedSku) {
+            if (!locatorStock[tx.locatorId]) locatorStock[tx.locatorId] = 0;
+            locatorStock[tx.locatorId] += tx.qty;
+          }
+        }
+        const available = Object.entries(locatorStock)
+          .filter(([_, qty]) => qty > 0)
+          .map(([locId, qty]) => ({ locatorId: locId, qty }));
+          
+        setOptions(available);
+        setSelectedLocator('');
+        setQty('');
+        setTransaction(null);
+      }).catch(console.error);
     }
   }, [selectedSku]);
 
   const handleSaveBook = async () => {
     if (!selectedSku || !selectedLocator || !qty) return;
-    const res = await fetch('/api/outbound/book', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sku: selectedSku,
-        locatorId: selectedLocator,
-        qty: Number(qty),
-        memo,
-        operator: 'Alex Rivera'
-      })
-    });
-    const data = await res.json();
-    if (res.ok) {
-      setTransaction(data.transaction);
-    } else {
-      alert(data.error);
+    
+    // Check validation
+    const pickVal = Math.abs(Number(qty));
+    const available = options.find(o => o.locatorId === selectedLocator)?.qty || 0;
+    
+    if (pickVal > available) {
+      alert(`Insufficient stock in ${selectedLocator}. Available: ${available}, Requested: ${pickVal}. Please adjust the quantity or pick from another rack.`);
+      return;
+    }
+    
+    const tx = {
+      id: uuidv4(),
+      type: 'OUTBOUND' as const,
+      sku: selectedSku,
+      qty: -pickVal,
+      locatorId: selectedLocator,
+      operator: 'Alex Rivera',
+      timestamp: new Date().toISOString(),
+      status: 'BOOKED' as const,
+      memo
+    };
+    
+    try {
+      await addTransaction(tx);
+      setTransaction(tx);
+    } catch (err: any) {
+      alert(err.message || "Error");
     }
   };
 
   const handleConfirm = async () => {
     if (!transaction) return;
-    const res = await fetch('/api/outbound/confirm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ transactionId: transaction.id })
-    });
-    if (res.ok) {
+    try {
+      await updateTransactionStatus(transaction.id, 'CONFIRMED');
       alert('Transaction Confirmed!');
       // Reset form
       setSelectedSku('');
@@ -66,6 +83,8 @@ export function Outbound() {
       setTransaction(null);
       setMemo('');
       setQty('');
+    } catch (e: any) {
+      alert(e.message || "Error");
     }
   };
 

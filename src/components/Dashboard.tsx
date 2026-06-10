@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, Box, LogIn, LogOut, AlertTriangle, RefreshCw } from 'lucide-react';
 import { WarehouseVisualizer } from './WarehouseVisualizer';
+import { getInventoryStats } from '../lib/db';
 
 export function Dashboard() {
   const [stats, setStats] = useState<any>(null);
 
   const fetchStats = () => {
-    fetch('/api/stats')
-      .then(res => res.json())
+    getInventoryStats()
       .then(setStats)
       .catch(console.error);
   };

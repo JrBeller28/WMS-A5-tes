@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { Barcode, CheckCircle2, AlertCircle } from 'lucide-react';
 import { Product, Locator } from '../types';
+import { getProducts, getPutawayRecommendations, addTransaction } from '../lib/db';
+import { v4 as uuidv4 } from 'uuid';
 
 export function Inbound() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -12,31 +14,22 @@ export function Inbound() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    fetch('/api/master/products')
-      .then(r => r.json())
-      .then(setProducts);
+    getProducts().then(setProducts).catch(console.error);
   }, []);
 
   const handleRecommend = async () => {
     if (!selectedSku || !qty) return;
     setLoading(true);
     try {
-      const res = await fetch('/api/putaway/recommend', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sku: selectedSku, qty: Number(qty) })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setRecommendations(data.recommendedLocators);
-        if (data.recommendedLocators.length > 0) {
-          setSelectedLocator(data.recommendedLocators[0].id);
-        }
+      const recs = await getPutawayRecommendations(selectedSku, Number(qty));
+      setRecommendations(recs);
+      if (recs.length > 0) {
+        setSelectedLocator(recs[0].id);
       } else {
-        setMessage({ type: 'error', text: data.error });
+        setMessage({ type: 'error', text: 'No suitable locators found.' });
       }
-    } catch (e) {
-      setMessage({ type: 'error', text: 'Error fetching recommendations' });
+    } catch (e: any) {
+      setMessage({ type: 'error', text: e.message || 'Error fetching recommendations' });
     }
     setLoading(false);
   };
@@ -55,25 +48,21 @@ export function Inbound() {
     }
 
     try {
-      const res = await fetch('/api/inbound', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          sku: selectedSku, 
-          qty: Number(qty), 
-          locatorId: selectedLocator,
-          operator: 'Alex Rivera'
-        })
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setMessage({ type: 'success', text: 'Putaway registered successfully!' });
-        setQty('');
-        setSelectedSku('');
-        setRecommendations([]);
-      } else {
-        setMessage({ type: 'error', text: data.error || 'Failed' });
-      }
+      const tx = {
+         id: uuidv4(),
+         type: 'INBOUND' as const,
+         sku: selectedSku,
+         qty: Math.abs(Number(qty)),
+         locatorId: selectedLocator,
+         operator: 'Alex Rivera',
+         timestamp: new Date().toISOString(),
+         status: 'CONFIRMED' as const
+      };
+      await addTransaction(tx);
+      setMessage({ type: 'success', text: 'Putaway registered successfully!' });
+      setQty('');
+      setSelectedSku('');
+      setRecommendations([]);
     } catch (e) {
       setMessage({ type: 'error', text: 'Network error' });
     }

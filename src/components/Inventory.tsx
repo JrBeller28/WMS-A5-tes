@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Upload, Download, Edit2, Trash2, X, Save, AlertCircle } from 'lucide-react';
 import { Product, ZoneCategory } from '../types';
+import { getProducts, addProduct, updateProduct, deleteProduct as deleteProductFromDb, addProductsBatch, getTransactions } from '../lib/db';
 
 export function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -10,10 +11,7 @@ export function Inventory() {
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
 
   const fetchProducts = () => {
-    fetch('/api/master/products')
-      .then(r => r.json())
-      .then(setProducts)
-      .catch(console.error);
+    getProducts().then(setProducts).catch(console.error);
   };
 
   useEffect(() => {
@@ -21,30 +19,27 @@ export function Inventory() {
   }, []);
 
   const handleSave = async () => {
-    if (!formData.sku || !formData.name || !formData.category || !formData.volumeM3) {
+    if (!formData.sku || !formData.name || !formData.category || !formData.volumeM3 || !formData.uom) {
       setMessage({ type: 'error', text: 'All fields are required.' });
       return;
     }
 
-    const url = editingProduct ? `/api/master/products/${editingProduct.sku}` : '/api/master/products';
-    const method = editingProduct ? 'PUT' : 'POST';
-
     try {
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setMessage({ type: 'success', text: `Product ${editingProduct ? 'updated' : 'added'} successfully.` });
-        setShowForm(false);
-        setEditingProduct(null);
-        setFormData({ sku: '', name: '', category: 'FG_PLUMBING', volumeM3: 0, uom: 'PCS' });
-        fetchProducts();
+      if (editingProduct) {
+        await updateProduct(editingProduct.sku, formData);
       } else {
-        setMessage({ type: 'error', text: data.error });
+        const ext = products.find(p => p.sku === formData.sku);
+        if (ext) {
+           setMessage({ type: 'error', text: 'SKU already exists' });
+           return;
+        }
+        await addProduct(formData as Product);
       }
+      setMessage({ type: 'success', text: `Product ${editingProduct ? 'updated' : 'added'} successfully.` });
+      setShowForm(false);
+      setEditingProduct(null);
+      setFormData({ sku: '', name: '', category: 'FG_PLUMBING', volumeM3: 0, uom: 'PCS' });
+      fetchProducts();
     } catch (e) {
       setMessage({ type: 'error', text: 'Network error.' });
     }
@@ -53,14 +48,15 @@ export function Inventory() {
   const handleDelete = async (sku: string) => {
     if (!confirm(`Are you sure you want to delete SKU: ${sku}?`)) return;
     try {
-      const res = await fetch(`/api/master/products/${sku}`, { method: 'DELETE' });
-      const data = await res.json();
-      if (res.ok) {
-        setMessage({ type: 'success', text: 'Product deleted successfully.' });
-        fetchProducts();
-      } else {
-        setMessage({ type: 'error', text: data.error });
+      const txs = await getTransactions();
+      const hasTransactions = txs.some(tx => tx.sku === sku);
+      if (hasTransactions) {
+        setMessage({ type: 'error', text: 'Cannot delete product with existing transactions' });
+        return;
       }
+      await deleteProductFromDb(sku);
+      setMessage({ type: 'success', text: 'Product deleted successfully.' });
+      fetchProducts();
     } catch (e) {
       setMessage({ type: 'error', text: 'Network error.' });
     }
@@ -111,18 +107,16 @@ export function Inventory() {
 
       if (productsToImport.length > 0) {
         try {
-          const res = await fetch('/api/master/products/batch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ products: productsToImport })
-          });
-          const data = await res.json();
-          if (res.ok) {
-            setMessage({ type: 'success', text: `Import successful: ${data.added} added, ${data.skipped} skipped.` });
-            fetchProducts();
-          } else {
-            setMessage({ type: 'error', text: data.error });
+          // Check existing to skip
+          const existSkus = new Set(products.map(p => p.sku));
+          const newProducts = productsToImport.filter(p => p.sku && !existSkus.has(p.sku)) as Product[];
+          
+          if (newProducts.length > 0) {
+              await addProductsBatch(newProducts);
           }
+          
+          setMessage({ type: 'success', text: `Import successful: ${newProducts.length} added, ${productsToImport.length - newProducts.length} skipped.` });
+          fetchProducts();
         } catch (err) {
           setMessage({ type: 'error', text: 'Error importing products.' });
         }
@@ -195,7 +189,7 @@ export function Inventory() {
               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">SKU</label>
               <input 
                 type="text" 
-                value={formData.sku} 
+                value={formData.sku || ''} 
                 onChange={e => setFormData({...formData, sku: e.target.value.toUpperCase()})}
                 disabled={!!editingProduct}
                 className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 font-mono disabled:opacity-50"
@@ -206,7 +200,7 @@ export function Inventory() {
               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Product Name</label>
               <input 
                 type="text" 
-                value={formData.name} 
+                value={formData.name || ''} 
                 onChange={e => setFormData({...formData, name: e.target.value})}
                 className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500"
                 placeholder="Product description"
@@ -215,7 +209,7 @@ export function Inventory() {
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Category / Zone</label>
               <select 
-                value={formData.category} 
+                value={formData.category || 'FG_PLUMBING'} 
                 onChange={e => setFormData({...formData, category: e.target.value as ZoneCategory})}
                 className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500"
               >
@@ -234,8 +228,8 @@ export function Inventory() {
                 type="number" 
                 step="0.01"
                 min="0.01"
-                value={formData.volumeM3} 
-                onChange={e => setFormData({...formData, volumeM3: parseFloat(e.target.value) || undefined})}
+                value={formData.volumeM3 || ''} 
+                onChange={e => setFormData({...formData, volumeM3: parseFloat(e.target.value) || '' as any})}
                 className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 font-mono"
                 placeholder="0.00"
               />
@@ -244,7 +238,7 @@ export function Inventory() {
               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">UOM</label>
               <input 
                 type="text" 
-                value={formData.uom} 
+                value={formData.uom || ''} 
                 onChange={e => setFormData({...formData, uom: e.target.value.toUpperCase()})}
                 className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 font-mono"
                 placeholder="PCS"

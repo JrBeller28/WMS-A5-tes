@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Layers, Map } from 'lucide-react';
 import { Locator, Product, ZoneCategory } from '../types';
+import { getLocators, getProducts, getInventoryDetails } from '../lib/db';
 
 interface LocatorStat {
   usedVol: number;
@@ -42,9 +43,9 @@ export function WarehouseVisualizer() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/master/locators').then(res => res.json()),
-      fetch('/api/master/products').then(res => res.json()),
-      fetch('/api/inventory').then(res => res.json())
+      getLocators(),
+      getProducts(),
+      getInventoryDetails()
     ]).then(([locData, prodData, invData]) => {
       setLocators(locData);
       setProducts(prodData);
