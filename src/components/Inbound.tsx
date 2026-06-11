@@ -403,7 +403,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
   }
   
   const rackLocators = compatibleLocators.filter(l => l.rack === rack);
-  const columns = Array.from(new Set(rackLocators.map(l => l.column))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const columns = Array.from(new Set(rackLocators.map(l => l.column as string))).sort((a, b) => (a as string).localeCompare(b as string, undefined, { numeric: true }));
   const maxLevel = rack.startsWith('FL') ? 2 : (rackLocators.length > 0 ? Math.max(...rackLocators.map(l => l.level)) : 4);
   const levels = Array.from({length: maxLevel}, (_, i) => maxLevel - i);
 
@@ -412,7 +412,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
       
       {/* 1. INTERFACES UTAMA */}
       <div className="print:hidden space-y-6">
-        <div className="flex justify-between items-start">
+        <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
           <div>
             <h2 className="text-2xl font-bold text-[#0F294D] tracking-tight">Directed Putaway</h2>
             <p className="text-slate-500 mt-1 text-xs">Multi-rack routing interface. Alokasikan pecahan kuantitas barang ke beberapa rak secara real-time.</p>
@@ -589,7 +589,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
                              <div key={c} className="w-24 flex-shrink-0 cursor-pointer" onClick={() => handleSlotGridClick(locId)}>
                                 <div className={`w-full bg-white border ${cardBorderColor} rounded p-1.5 relative transition-all`}>
                                    <div className="flex justify-between items-center text-[9px] font-bold text-slate-700 mb-1">
-                                     <span>{c.replace('FL-','')}.{lvl}</span>
+                                     <span>{(c as string).replace('FL-','')}.{lvl}</span>
                                      <span className="text-slate-400">{stat.pct}%</span>
                                    </div>
                                    <div className="h-6 flex flex-col justify-center text-[9px]">

@@ -83,7 +83,7 @@ export function StockLedger({ globalSearch = '' }: { globalSearch?: string }) {
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
+          <table className="w-full text-left min-w-[850px]">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Waktu</th>
@@ -219,7 +219,7 @@ export function StockLedger({ globalSearch = '' }: { globalSearch?: string }) {
             </div>
             
             <div className="p-6 space-y-6">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Transaction ID</label>
                   <div className="text-sm font-mono text-slate-800 bg-slate-50 p-2 rounded border border-slate-100 break-all">
@@ -234,7 +234,7 @@ export function StockLedger({ globalSearch = '' }: { globalSearch?: string }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
                   <label className="block text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">SKU</label>
                   <div className="text-lg font-bold font-mono text-blue-900">{selectedTx.sku}</div>
@@ -245,7 +245,7 @@ export function StockLedger({ globalSearch = '' }: { globalSearch?: string }) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-4 border-y border-slate-100 py-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 border-y border-slate-100 py-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Quantity</label>
                   <div className={`text-xl font-bold font-mono ${selectedTx.qty > 0 ? 'text-emerald-600' : 'text-amber-600'}`}>

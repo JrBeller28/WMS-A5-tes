@@ -359,13 +359,14 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
          >
            <option value="">Semua Kategori Layout</option>
            {Array.from(new Set(products.map(p => p.category))).map(cat => (
-             <option key={cat} value={cat}>{cat.replace('_', ' ')}</option>
+             <option key={cat as string} value={cat as string}>{(cat as string).replace('_', ' ')}</option>
            ))}
          </select>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden text-slate-800">
-        <table className="w-full text-left">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left min-w-[900px]">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KODE SKU</th>
@@ -478,6 +479,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
             </tfoot>
           )}
         </table>
+        </div>
       </div>
     </div>
   );

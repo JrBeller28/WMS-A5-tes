@@ -77,7 +77,7 @@ export function Dashboard({
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-between items-end">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-3">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Operations Dashboard</h2>
           <p className="text-slate-500 mt-1 text-sm">Real-time inventory and flow status</p>

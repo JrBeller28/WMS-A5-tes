@@ -147,7 +147,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
   }, [aiRecommendedAllocations, editingManifestId]);
 
   const totalAvailable = useMemo(() => (availableStock || []).reduce((sum, item) => sum + (item?.available || 0), 0), [availableStock]);
-  const totalAllocated = useMemo(() => Object.values(allocations || {}).reduce((sum, qty) => sum + (qty || 0), 0), [allocations]);
+  const totalAllocated = useMemo(() => Object.values(allocations || {}).reduce((sum: number, qty: any) => sum + (Number(qty) || 0), 0), [allocations]);
   const unallocatedQty = Math.max(0, Number(targetQty || 0) - totalAllocated);
   const isTargetMet = parseInt(targetQty) > 0 && totalAllocated === parseInt(targetQty);
   const isExceedingStock = parseInt(targetQty) > totalAvailable && !editingManifestId;
@@ -159,7 +159,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
     if (!targetQty || Number(targetQty) <= 0) return 'Masukkan kuantitas target pick untuk memetakan lokasi';
     
     const activeSlots = Object.entries(aiRecommendedAllocations || {})
-      .filter(([_, qty]) => qty > 0)
+      .filter(([_, qty]) => (qty as number) > 0)
       .map(([locId, qty]) => `${locId} (${qty} PCS)`)
       .sort();
 
@@ -220,7 +220,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
       const activeManifestId = editingManifestId || 'MFS-OUT-' + uuidv4().slice(0,8).toUpperCase();
       
       for (const [locatorId, pickQty] of Object.entries(allocations || {})) {
-        if (pickQty > 0) {
+        if ((pickQty as number) > 0) {
           const tx = {
             id: uuidv4(),
             manifestId: activeManifestId, 
@@ -428,7 +428,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
     <div className="space-y-6 max-w-[1200px] mx-auto p-4">
       
       <div className="print:hidden space-y-6">
-        <div className="flex justify-between items-start">
+        <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
           <div>
             <h2 className="text-2xl font-bold text-[#0F294D] tracking-tight">Directed Picking (Outbound)</h2>
             <p className="text-slate-500 mt-1 text-xs">Multi-rack allocation routing interface. Ambil pecahan kuantitas barang dari beberapa rak secara sistematis.</p>

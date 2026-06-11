@@ -1,4 +1,4 @@
-import { auth, db } from './src/lib/firebase';
+import { db } from './src/firebase';
 import { getDocs, collection, deleteDoc } from 'firebase/firestore';
 
 async function run() {

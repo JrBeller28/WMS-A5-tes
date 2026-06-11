@@ -137,9 +137,9 @@ export function WarehouseVisualizer() {
 
   // Derive rack specific data for the Right Panel
   const selectedConfig = RACK_LAYOUT.find(r => r.id === selectedRack);
-  const rackLocators = locators.filter(l => selectedConfig?.racks.includes(l.rack));
+  const rackLocators = locators.filter(l => selectedConfig?.racks?.includes(l.rack) ?? false);
   const rackZone = selectedConfig?.zone || 'DEFAULT';
-  const columns = Array.from(new Set(rackLocators.map(l => l.column))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const columns = Array.from(new Set(rackLocators.map(l => l.column as string))).sort((a, b) => (a as string).localeCompare(b as string, undefined, { numeric: true }));
   const isFloatingRack = selectedRack.startsWith('FL');
   const maxLevel = isFloatingRack ? 2 : (rackLocators.length > 0 ? Math.max(...rackLocators.map(l => l.level)) : 4);
   const levels = Array.from({length: maxLevel}, (_, i) => maxLevel - i);
@@ -163,13 +163,13 @@ export function WarehouseVisualizer() {
   return (
     <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden font-sans shadow-sm relative">
       {/* Header */}
-      <div className="bg-white border-b border-slate-200 p-4 flex justify-between items-center bg-slate-50/50">
+      <div className="bg-white border-b border-slate-200 p-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-50/50">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg">
+          <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg shrink-0">
             <Layers className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-lg font-black tracking-tight text-slate-800 uppercase">
+            <h2 className="text-base sm:text-lg font-black tracking-tight text-slate-800 uppercase">
               Visualisasi Zonasi Layout & Raks (Gudang PSN)
             </h2>
             <p className="text-xs text-slate-500">Klik Rak pada denah lantai untuk membuka elevasi rak (Front View Grid) & detail slot locator.</p>
@@ -177,7 +177,7 @@ export function WarehouseVisualizer() {
         </div>
         
         {/* Legend Map */}
-        <div className="hidden md:flex gap-2">
+        <div className="flex flex-wrap gap-1.5 md:gap-2">
           {Object.entries(ZONE_COLORS).map(([key, val]) => {
             if (key === 'DEFAULT') return null;
             return (
@@ -195,13 +195,13 @@ export function WarehouseVisualizer() {
         <div className="flex flex-col xl:flex-row min-h-[600px]">
           
           {/* Left Panel - 2D Floor Plan */}
-          <div className="w-full xl:w-80 bg-white border-r border-slate-200 p-5 shrink-0 flex flex-col">
+          <div className="w-full xl:w-80 bg-white border-b xl:border-b-0 xl:border-r border-slate-200 p-5 shrink-0 flex flex-col">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-xs font-bold text-slate-400 tracking-widest uppercase">Denah Lantai Fisik Gudang (Floor Plan)</h3>
-              <span className="px-2 py-1 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-[10px] font-bold">2D MAP VIEW</span>
+              <h3 className="text-xs font-bold text-slate-400 tracking-widest uppercase">Denah Lantai (Floor Plan)</h3>
+              <span className="px-2 py-1 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded text-[10px] font-bold">2D MAP</span>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 flex-1">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-2 gap-3 flex-1">
               {RACK_LAYOUT.map(rack => {
                 const colors = ZONE_COLORS[rack.zone] || ZONE_COLORS['DEFAULT'];
                 const isActive = selectedRack === rack.id;
@@ -218,7 +218,7 @@ export function WarehouseVisualizer() {
                 );
               })}
               
-              <div className="col-span-2 mt-2">
+              <div className="col-span-full mt-2">
                 <div className="w-full py-2 bg-slate-100 border border-slate-200 border-dashed rounded text-center text-[10px] font-bold text-slate-400 tracking-widest">
                   LANE / GANGWAY AKSES FORKLIFT (CLEARANCE ZONE)
                 </div>
@@ -246,20 +246,20 @@ export function WarehouseVisualizer() {
           <div className="flex-1 bg-white p-6 overflow-hidden flex flex-col">
             
             {/* Elevation Header */}
-            <div className="flex justify-between items-start mb-8 pb-4 border-b border-slate-100">
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6 pb-4 border-b border-slate-100">
               <div>
-                <h3 className="text-lg font-mono font-bold text-slate-800 flex items-center gap-2">
-                  <Map className="w-5 h-5 text-indigo-500" />
-                  ELEVASI DEPAN (FRONT VIEW) RAK: RACK {selectedRack} 
-                  <span className="text-slate-400 text-base">({columns[0]} - {columns[columns.length - 1]})</span>
+                <h3 className="text-base sm:text-lg font-bold text-slate-800 flex flex-wrap items-center gap-2">
+                  <Map className="w-5 h-5 text-indigo-500 shrink-0" />
+                  <span>ELEVASI DEPAN (FRONT VIEW) RAK: RACK {selectedRack}</span>
+                  <span className="text-slate-400 text-xs sm:text-sm font-mono font-normal">({columns[0]} - {columns[columns.length - 1]})</span>
                 </h3>
-                <p className="text-sm font-medium text-slate-600 mt-1">
+                <p className="text-xs sm:text-sm font-medium text-slate-600 mt-1">
                   Kategori Zona: <span className={`font-bold ${ZONE_COLORS[rackZone]?.text || ''}`}>{ZONE_COLORS[rackZone]?.label}</span>
                 </p>
               </div>
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-right">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Total Volume</p>
-                <p className="text-sm font-mono font-bold text-slate-800">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-left sm:text-right w-full sm:w-auto shrink-0">
+                <p className="text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Total Volume Terpakai</p>
+                <p className="text-xs sm:text-sm font-mono font-bold text-slate-800">
                   {usedRackVolume.toFixed(2)} m³ / {totalRackVolume.toFixed(1)} m³
                 </p>
               </div>
@@ -296,7 +296,7 @@ export function WarehouseVisualizer() {
                               
                               {/* Slot ID & % */}
                               <div className="flex justify-between items-start">
-                                <span className="font-bold text-slate-800 text-sm">{col.replace('FL-', '')}.{level}</span>
+                                <span className="font-bold text-slate-800 text-sm">{(col as string).replace('FL-', '')}.{level}</span>
                                 <span className={`text-[11px] font-bold ${stat.percentage >= 95 ? 'text-rose-600' : 'text-slate-400'}`}>
                                   {stat.percentage}%
                                 </span>

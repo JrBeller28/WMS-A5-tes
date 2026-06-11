@@ -200,7 +200,7 @@ export const getPutawayRecommendations = async (sku: string, qty: number) => {
       
       if (availableLocators.length === 0) {
         // Fallback to ALL OTHER available non-default locators
-        const otherLocators = locators.filter(l => !preferredRacks.includes(l.rack) && l.zone !== product.category && l.zone !== 'DEFAULT');
+        const otherLocators = locators.filter(l => !preferredRacks.includes(l.rack) && l.zone !== product.category && (l.zone as string) !== 'DEFAULT');
         availableLocators = getAvailable(otherLocators);
       }
     }
