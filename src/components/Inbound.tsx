@@ -81,14 +81,32 @@ export function Inbound() {
     return l.zone === productDetails.category;
   });
 
+  // Validasi otomatis saat SKU dipilih
   useEffect(() => {
     setTempAllocations([]);
-  }, [selectedSku, totalQty]);
+    if (selectedSku) {
+      const prod = products.find(p => p.sku === selectedSku);
+      if (!prod || prod.volumeM3 === undefined || prod.volumeM3 === null || prod.volumeM3 <= 0) {
+        setMessage({ 
+          type: 'error', 
+          text: 'Barang tersebut tidak ada volumenya. Tidak bisa melakukan transaksi, silakan hubungi Super Admin untuk menambahkan volumenya.' 
+        });
+      } else {
+        setMessage(null);
+      }
+    } else {
+      setMessage(null);
+    }
+  }, [selectedSku, products]);
 
   const unallocatedQty = Math.max(0, Number(totalQty || 0) - tempAllocations.reduce((sum, item) => sum + item.qty, 0));
 
   const handleRecommend = async () => {
     if (!selectedSku || unallocatedQty <= 0) return;
+    // Blokir rekomendasi jika volume produk tidak valid
+    if (!productDetails || productDetails.volumeM3 === undefined || productDetails.volumeM3 === null || productDetails.volumeM3 <= 0) {
+      return;
+    }
     setLoading(true);
     try {
       const recs = await getPutawayRecommendations(selectedSku, unallocatedQty);
@@ -115,14 +133,14 @@ export function Inbound() {
       const pData = products.find(p => p.sku === sku);
       const locQty = data.locators[locId]?.physicalQty || 0;
       if (locQty > 0 && pData) {
-        usedVol += locQty * pData.volumeM3;
+        usedVol += locQty * (pData.volumeM3 || 0);
         items.push({ sku, qty: locQty });
       }
     });
     
     inboundList.filter(i => i.locatorId === locId).forEach(pendingItem => {
       const pData = products.find(p => p.sku === pendingItem.sku);
-      if (pData) usedVol += pendingItem.qty * pData.volumeM3;
+      if (pData) usedVol += pendingItem.qty * (pData.volumeM3 || 0);
       const existing = items.find(i => i.sku === pendingItem.sku);
       if (existing) existing.qty += pendingItem.qty;
       else items.push({ sku: pendingItem.sku, qty: pendingItem.qty });
@@ -130,7 +148,7 @@ export function Inbound() {
 
     const activeTemp = tempAllocations.find(t => t.locatorId === locId);
     if (activeTemp && productDetails) {
-      usedVol += activeTemp.qty * productDetails.volumeM3;
+      usedVol += activeTemp.qty * (productDetails.volumeM3 || 0);
       const existing = items.find(i => i.sku === selectedSku);
       if (existing) existing.qty += activeTemp.qty;
       else items.push({ sku: selectedSku, qty: activeTemp.qty });
@@ -146,6 +164,16 @@ export function Inbound() {
       setMessage({ type: 'error', text: 'Tentukan SKU barang terlebih dahulu.' });
       return;
     }
+
+    // Proteksi tingkat grid klik jika volume kosong/0
+    if (!productDetails || productDetails.volumeM3 === undefined || productDetails.volumeM3 === null || productDetails.volumeM3 <= 0) {
+      setMessage({ 
+        type: 'error', 
+        text: 'Tidak dapat melanjutkan transaksi. Barang tersebut tidak ada volumenya, silakan hubungi Super Admin untuk menambahkan volumenya.' 
+      });
+      return;
+    }
+
     if (!totalQty || Number(totalQty) <= 0) {
       setMessage({ type: 'error', text: 'Masukkan kuantitas total material masuk.' });
       return;
@@ -161,7 +189,7 @@ export function Inbound() {
       return;
     }
 
-    const unitVolume = productDetails?.volumeM3 || 0.1;
+    const unitVolume = productDetails.volumeM3;
     const stat = getSlotStat(locId);
     const availableVol = Math.max(0, stat.maxVol - stat.usedVol);
     if (availableVol <= 0) {
@@ -186,6 +214,14 @@ export function Inbound() {
   };
 
   const handleAddBatchToList = () => {
+    if (!productDetails || productDetails.volumeM3 === undefined || productDetails.volumeM3 === null || productDetails.volumeM3 <= 0) {
+      setMessage({ 
+        type: 'error', 
+        text: 'Tidak dapat menyimpan alokasi. Barang tersebut tidak ada volumenya, silakan hubungi Super Admin untuk menambahkan volumenya.' 
+      });
+      return;
+    }
+
     if (tempAllocations.length === 0) {
       setMessage({ type: 'error', text: 'Pilih minimal 1 atau beberapa rak pada grid matrix.' });
       return;
@@ -234,7 +270,7 @@ export function Inbound() {
            qty: item.qty,
            locatorId: item.locatorId,
            operator: operatorName,
-           timestamp: isoTimestamp, // Token identik sebagai ID Batch Invoice cetakan
+           timestamp: isoTimestamp, 
            status: 'CONFIRMED' as const
         };
         await addTransaction(individualTx);
@@ -276,7 +312,7 @@ export function Inbound() {
         sku: bTx.sku,
         name: prod ? prod.name : 'PRODUCT REMOVED',
         qty: bTx.qty,
-        volume: prod ? (prod.volumeM3 * bTx.qty) : 0,
+        volume: prod ? ((prod.volumeM3 || 0) * bTx.qty) : 0,
         locatorId: bTx.locatorId
       };
     });
@@ -405,7 +441,7 @@ export function Inbound() {
                      <label className="block text-xs text-slate-600 mb-1 font-semibold">Total Vol (m³)</label>
                     <input 
                       type="text" 
-                      value={productDetails && totalQty ? (productDetails.volumeM3 * Number(totalQty)).toFixed(3) : '0.000'}
+                      value={productDetails && totalQty ? (Number(productDetails.volumeM3 || 0) * Number(totalQty)).toFixed(3) : '0.000'}
                       readOnly
                       className="w-full p-2 border border-slate-300 rounded text-xs bg-slate-50 font-mono"
                     />
@@ -451,7 +487,7 @@ export function Inbound() {
             <div className="pt-4 mt-4 border-t border-slate-100 space-y-2">
               <button 
                 onClick={handleAddBatchToList}
-                disabled={tempAllocations.length === 0}
+                disabled={tempAllocations.length === 0 || !productDetails || !productDetails.volumeM3 || productDetails.volumeM3 <= 0}
                 className="w-full bg-[#34d399] font-bold text-slate-900 py-2.5 rounded text-xs flex items-center justify-center gap-1.5 hover:bg-[#10b981] transition-colors disabled:opacity-40"
               >
                 <Shield className="w-3.5 h-3.5" />

@@ -56,12 +56,30 @@ export function Outbound() {
     refreshTransactionsData();
   }, []);
 
+  // Memeriksa status kevalidan volume produk secara global di dalam komponen
+  const productDetails = products.find(p => p.sku === selectedSku);
+  const isVolumeInvalid = selectedSku && (!productDetails || productDetails.volumeM3 === undefined || productDetails.volumeM3 === null || productDetails.volumeM3 <= 0);
+
   // Ambil data ketersediaan stok material di gudang secara real-time berdasarkan SKU terpilih
   useEffect(() => {
     if (!selectedSku) {
       setAvailableStock([]);
       setAllocations({});
+      setMessage(null);
       return;
+    }
+
+    // Validasi otomatis jika barang tidak memiliki volume
+    if (isVolumeInvalid) {
+      setMessage({ 
+        type: 'error', 
+        text: 'Barang tersebut tidak ada volumenya. Tidak bisa melakukan transaksi, silakan hubungi Super Admin untuk menambahkan volumenya.' 
+      });
+      setAvailableStock([]);
+      setAllocations({});
+      return;
+    } else {
+      setMessage(null);
     }
 
     getTransactions().then(txs => {
@@ -87,12 +105,12 @@ export function Outbound() {
         setAllocations({});
       }
     }).catch(console.error);
-  }, [selectedSku, locators]);
+  }, [selectedSku, locators, isVolumeInvalid]);
 
-  // Kalkulasi Intuitif Murni untuk Rekomendasi AI (Tidak mengikat state utama secara langsung)
+  // Kalkulasi Intuitif Murni untuk Rekomendasi AI
   const aiRecommendedAllocations = useMemo(() => {
     const qty = parseInt(targetQty);
-    if (!qty || qty <= 0 || availableStock.length === 0) return {};
+    if (!qty || qty <= 0 || availableStock.length === 0 || isVolumeInvalid) return {};
 
     let remaining = qty;
     const recommended: Record<string, number> = {};
@@ -104,7 +122,7 @@ export function Outbound() {
       remaining -= take;
     }
     return recommended;
-  }, [targetQty, availableStock]);
+  }, [targetQty, availableStock, isVolumeInvalid]);
 
   // Set alokasi otomatis saat target qty berubah pertama kali sebagai baseline rekomendasi awal
   useEffect(() => {
@@ -121,6 +139,7 @@ export function Outbound() {
   // Menghasilkan string rekomendasi alokasi slot dinamis untuk banner AI tetap bersih
   const aiRecommendationSlots = useMemo(() => {
     if (!selectedSku) return 'Silakan tentukan SKU material terlebih dahulu';
+    if (isVolumeInvalid) return 'Barang tidak valid (volume kosong). Hubungi Super Admin.';
     if (!targetQty || Number(targetQty) <= 0) return 'Masukkan kuantitas target pick untuk memetakan lokasi';
     
     const activeSlots = Object.entries(aiRecommendedAllocations)
@@ -130,7 +149,7 @@ export function Outbound() {
 
     if (activeSlots.length === 0) return 'Stok material tidak ditemukan di slot manapun';
     return activeSlots.join(', ');
-  }, [aiRecommendedAllocations, selectedSku, targetQty]);
+  }, [aiRecommendedAllocations, selectedSku, targetQty, isVolumeInvalid]);
 
   const handleReviewPendingGroup = (group: any) => {
     setEditingManifestId(group.manifestId);
@@ -159,6 +178,14 @@ export function Outbound() {
 
   const handleSaveBook = async () => {
     if (!selectedSku || !targetQty || !isTargetMet) return;
+    
+    if (isVolumeInvalid) {
+      setMessage({ 
+        type: 'error', 
+        text: 'Tidak dapat menyimpan transaksi. Barang tersebut tidak ada volumenya, silakan hubungi Super Admin untuk menambahkan volumenya.' 
+      });
+      return;
+    }
     
     const user = getCurrentUser();
     const operatorName = user ? user.name : 'IWAN GUNAWAN';
@@ -287,9 +314,10 @@ export function Outbound() {
     return Object.values(groups);
   }, [bookedTransactions]);
 
-  // Grouping Utama Semua Riwayat Transaksi Outbound
+  // Grouping Utama Semua Riwayat Transaksi Outbound (FIXED UNIQUE KEY)
   const aggregatedHistoryTransactions = useMemo(() => {
     const groups: Record<string, {
+      id: string; // Menampung key unik asli transaksi
       manifestId: string;
       timestamp: string;
       sku: string;
@@ -305,6 +333,7 @@ export function Outbound() {
       const key = tx.manifestId || tx.id;
       if (!groups[key]) {
         groups[key] = {
+          id: key, // Menyimpan id pembeda unik agar tidak duplikat saat loop rendering
           manifestId: tx.manifestId || '-',
           timestamp: tx.timestamp,
           sku: tx.sku,
@@ -357,7 +386,6 @@ export function Outbound() {
   return (
     <div className="space-y-6 max-w-[1200px] mx-auto p-4">
       
-      {/* INTERFACES UTAMA */}
       <div className="print:hidden space-y-6">
         <div className="flex justify-between items-start">
           <div>
@@ -402,7 +430,7 @@ export function Outbound() {
                   </select>
                 </div>
 
-                {selectedSku && (
+                {selectedSku && !isVolumeInvalid && (
                   <div className="grid grid-cols-2 gap-3 animate-fadeIn">
                     <div>
                       <label className="block text-xs text-slate-600 mb-1 font-semibold">Total Qty Pick</label>
@@ -427,7 +455,7 @@ export function Outbound() {
                   </div>
                 )}
 
-                {Number(targetQty) > 0 && !isExceedingStock && (
+                {Number(targetQty) > 0 && !isExceedingStock && !isVolumeInvalid && (
                   <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-[11px] space-y-1 font-medium animate-fadeIn">
                     <div className="flex justify-between">
                       <span className="text-slate-500">Sisa Belum Teralokasi:</span>
@@ -440,7 +468,7 @@ export function Outbound() {
                   </div>
                 )}
 
-                {isExceedingStock && (
+                {isExceedingStock && !isVolumeInvalid && (
                   <div className="p-2 bg-red-50 text-red-700 border border-red-200 rounded text-[11px] font-bold flex items-center gap-1">
                     <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                     Jumlah permintaan melebihi total stok gudang!
@@ -470,7 +498,7 @@ export function Outbound() {
             <div className="pt-4 mt-4 border-t border-slate-100 space-y-2">
               <button 
                 onClick={handleSaveBook}
-                disabled={!isTargetMet}
+                disabled={!isTargetMet || isVolumeInvalid}
                 className="w-full bg-[#059669] font-bold text-white py-2.5 rounded text-xs flex items-center justify-center gap-1.5 hover:bg-emerald-700 transition-colors disabled:opacity-40"
               >
                 <Save className="w-3.5 h-3.5" />
@@ -497,8 +525,6 @@ export function Outbound() {
 
           {/* AI Recommendation & Custom Selection Panel */}
           <section className="col-span-12 lg:col-span-7 flex flex-col justify-start space-y-4">
-            
-            {/* TAMPILAN BANNER AI RECOMMENDATION */}
             <div className="bg-[#0055C4] text-white rounded-lg p-5 shadow-md flex flex-col justify-center border-l-4 border-emerald-400">
               <div className="flex items-center gap-2">
                 <span className="bg-white/20 text-[9px] font-black px-2 py-0.5 rounded tracking-widest uppercase text-white font-mono">
@@ -517,7 +543,7 @@ export function Outbound() {
             </div>
 
             {/* FORM ALOKASI MANUAL (ADMIN CONTROL PANEL) */}
-            {availableStock.length > 0 && (
+            {availableStock.length > 0 && !isVolumeInvalid && (
               <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm animate-fadeIn">
                 <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-100">
                   <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -527,7 +553,6 @@ export function Outbound() {
                     type="button"
                     onClick={() => setAllocations(aiRecommendedAllocations)}
                     className="text-[10px] bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-[#0055C4] hover:border-blue-200 border border-slate-200 px-2 py-1 rounded font-bold transition-all flex items-center gap-1"
-                    title="Gunakan pembagian rute bawaan AI"
                   >
                     <RefreshCw className="w-3 h-3" /> Reset ke Rekomendasi AI
                   </button>
@@ -590,7 +615,6 @@ export function Outbound() {
                 <button 
                   onClick={() => setReceiptPreview(null)}
                   className="bg-slate-300 hover:bg-slate-400 text-slate-700 text-[11px] p-1 rounded transition-colors"
-                  title="Tutup Preview"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -761,7 +785,8 @@ export function Outbound() {
                   </tr>
                 ) : (
                   aggregatedHistoryTransactions.map((group) => (
-                    <tr key={group.manifestId} className="hover:bg-slate-50/50 transition-colors">
+                    /* PERBAIKAN: Menggunakan group.id yang dijamin unik daripada group.manifestId */
+                    <tr key={group.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="p-2.5 whitespace-nowrap text-slate-500 text-[11px]">
                         {new Date(group.timestamp).toLocaleString('id-ID')}
                       </td>

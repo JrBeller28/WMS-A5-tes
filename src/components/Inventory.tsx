@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Plus, Upload, Download, Edit2, Trash2, X, Save, AlertCircle, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Product, ZoneCategory } from '../types';
 import { getProducts, addProduct, updateProduct, deleteProduct as deleteProductFromDb, addProductsBatch, getTransactions, getInventoryDetails } from '../lib/db';
+import { getCurrentUser } from '../lib/auth'; // Mengambil fungsi auth
 
 export function Inventory() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -11,6 +12,10 @@ export function Inventory() {
   const [formData, setFormData] = useState<Partial<Product>>({ sku: '', name: '', category: 'FG_PLUMBING', volumeM3: 0, uom: 'PCS' });
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('');
+
+  // Ambil data user aktif dan validasi status Super Admin
+  const currentUser = getCurrentUser();
+  const isSuperAdmin = currentUser?.role?.toUpperCase() === 'SUPER_ADMIN' || currentUser?.role?.toLowerCase() === 'super admin';
 
   const fetchProducts = () => {
     Promise.all([
@@ -27,20 +32,20 @@ export function Inventory() {
   }, []);
 
   const handleSave = async () => {
-    if (!formData.sku || !formData.name || !formData.category || !formData.volumeM3 || !formData.uom) {
+    if (!formData.sku || !formData.name || !formData.category || formData.volumeM3 === undefined || formData.volumeM3 === '' || !formData.uom) {
       setMessage({ type: 'error', text: 'All fields are required.' });
       return;
     }
 
     try {
       if (editingProduct) {
+        // Proteksi tingkat fungsi untuk edit
+        if (!isSuperAdmin) {
+          setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin yang boleh mengubah data SKU.' });
+          return;
+        }
         await updateProduct(editingProduct.sku, formData);
       } else {
-        const ext = products.find(p => p.sku === formData.sku);
-        if (ext) {
-           setMessage({ type: 'error', text: 'SKU already exists' });
-           return;
-        }
         await addProduct(formData as Product);
       }
       setMessage({ type: 'success', text: `Product ${editingProduct ? 'updated' : 'added'} successfully.` });
@@ -54,6 +59,12 @@ export function Inventory() {
   };
 
   const handleDelete = async (sku: string) => {
+    // Proteksi tingkat fungsi untuk hapus
+    if (!isSuperAdmin) {
+      setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin yang berhak menghapus data SKU.' });
+      return;
+    }
+
     if (!confirm(`Are you sure you want to delete SKU: ${sku}?`)) return;
     try {
       const txs = await getTransactions();
@@ -71,23 +82,36 @@ export function Inventory() {
   };
 
   const handleEditClick = (product: Product) => {
+    if (!isSuperAdmin) return;
     setEditingProduct(product);
     setFormData(product);
     setShowForm(true);
+    setMessage(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const downloadTemplate = () => {
-    const csvContent = "data:text/csv;charset=utf-8,sku,name,category,volumeM3,uom\nEXAMPLE-01,Example Product,FG_PLUMBING,0.5,PCS\nEXAMPLE-02,Another Example,FG_SMART_WATER,0.2,BOX";
+    const csvContent = "data:text/csv;charset=utf-8,sku,name,category,volumeM3,uom\n" +
+                       "P-PLUMB-001,Pipa PVC 2 Inch,FG_PLUMBING,0.015,PCS\n" +
+                       "S-SMART-002,Water Flow Meter Digital,FG_SMART_WATER,0.008,BOX\n" +
+                       "F-FIT-003,Sock Drat Dalam 1/2,FG_FITTING,0.002,PCS";
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", "product_template.csv");
+    link.setAttribute("download", "template_import_sku.csv");
     document.body.appendChild(link);
     link.click();
     link.remove();
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Proteksi tingkat fungsi untuk import data batch
+    if (!isSuperAdmin) {
+      setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin yang berhak mengimpor file CSV.' });
+      e.target.value = '';
+      return;
+    }
+
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -97,25 +121,23 @@ export function Inventory() {
       const lines = text.split('\n');
       const productsToImport: Partial<Product>[] = [];
 
-      // Skip header (i=0)
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
         const [sku, name, category, volumeM3, uom] = line.split(',');
         if (sku && name && category && volumeM3) {
           productsToImport.push({
-            sku: sku.trim(),
+            sku: sku.trim().toUpperCase(),
             name: name.trim(),
             category: category.trim() as ZoneCategory,
             volumeM3: parseFloat(volumeM3.trim()),
-            uom: uom ? uom.trim() : 'PCS'
+            uom: uom ? uom.trim().toUpperCase() : 'PCS'
           });
         }
       }
 
       if (productsToImport.length > 0) {
         try {
-          // Check existing to skip
           const existSkus = new Set(products.map(p => p.sku));
           const newProducts = productsToImport.filter(p => p.sku && !existSkus.has(p.sku)) as Product[];
           
@@ -123,16 +145,17 @@ export function Inventory() {
               await addProductsBatch(newProducts);
           }
           
-          setMessage({ type: 'success', text: `Import successful: ${newProducts.length} added, ${productsToImport.length - newProducts.length} skipped.` });
+          setMessage({ 
+            type: 'success', 
+            text: `Berhasil mengimpor data: ${newProducts.length} SKU baru ditambahkan, ${productsToImport.length - newProducts.length} SKU dilewati karena duplikat.` 
+          });
           fetchProducts();
         } catch (err) {
-          setMessage({ type: 'error', text: 'Error importing products.' });
+          setMessage({ type: 'error', text: 'Gagal mengimpor produk ke database.' });
         }
       } else {
-        setMessage({ type: 'error', text: 'No valid products found in CSV.' });
+        setMessage({ type: 'error', text: 'Tidak ada data produk valid yang ditemukan di dalam CSV.' });
       }
-      
-      // reset file input
       e.target.value = '';
     };
     reader.readAsText(file);
@@ -144,9 +167,13 @@ export function Inventory() {
         <div 
           className="p-5 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors border-b border-slate-200"
           onClick={() => {
-            setEditingProduct(null);
-            setFormData({ sku: '', name: '', category: 'FG_PLUMBING', volumeM3: '' as any, uom: 'PCS' });
-            setShowForm(!showForm);
+            if (!showForm || editingProduct) {
+              setEditingProduct(null);
+              setFormData({ sku: '', name: '', category: 'FG_PLUMBING', volumeM3: '' as any, uom: 'PCS' });
+              setShowForm(true);
+            } else {
+              setShowForm(false);
+            }
             setMessage(null);
           }}
         >
@@ -163,6 +190,47 @@ export function Inventory() {
         </div>
       </div>
 
+      {/* MENU ALAT UTALITAS BULK IMPORT & TEMPLATE CSV */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h4 className="text-sm font-bold text-slate-800">Aksi Massal (Bulk Management)</h4>
+          <p className="text-xs text-slate-500 mt-0.5">Unggah data katalog gudang dalam jumlah banyak sekaligus menggunakan file spreadsheet (CSV).</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2.5 w-full sm:w-auto">
+          <button
+            type="button"
+            onClick={downloadTemplate}
+            className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-white border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-100 transition-colors shadow-sm w-full sm:w-auto"
+          >
+            <Download className="w-4 h-4 text-slate-500" />
+            Unduh Template CSV
+          </button>
+          
+          {isSuperAdmin ? (
+            <label className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold rounded-lg hover:bg-blue-100 transition-colors shadow-sm cursor-pointer w-full sm:w-auto">
+              <Upload className="w-4 h-4" />
+              <span>Import CSV</span>
+              <input
+                type="file"
+                accept=".csv"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+            </label>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-slate-100 border border-slate-200 text-slate-400 text-xs font-bold rounded-lg opacity-60 cursor-not-allowed w-full sm:w-auto"
+              title="Fitur import hanya tersedia untuk Super Admin"
+            >
+              <Upload className="w-4 h-4" />
+              Import CSV (Terproteksi)
+            </button>
+          )}
+        </div>
+      </div>
+
       {message && (
         <div className={`p-4 rounded-lg flex items-center gap-2 text-sm font-bold ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
           <AlertCircle className="w-5 h-5"/>
@@ -171,12 +239,12 @@ export function Inventory() {
         </div>
       )}
 
-      {/* Slide-out Form Panel (simplified as inline card) */}
+      {/* Slide-out Form Panel */}
       {showForm && (
-        <div className="bg-white border-2 border-blue-200 rounded-xl p-6 shadow-md mb-6">
+        <div className="bg-white border-2 border-blue-200 rounded-xl p-6 shadow-md mb-6 animate-fadeIn">
           <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-4">
-            <h3 className="text-lg font-bold text-slate-800">{editingProduct ? 'Edit Product' : 'Add New Product'}</h3>
-            <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
+            <h3 className="text-lg font-bold text-slate-800">{editingProduct ? 'Edit Product (Super Admin Only)' : 'Add New Product'}</h3>
+            <button onClick={() => { setShowForm(false); setEditingProduct(null); }} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -222,9 +290,9 @@ export function Inventory() {
               <input 
                 type="number" 
                 step="0.01"
-                min="0.01"
-                value={formData.volumeM3 || ''} 
-                onChange={e => setFormData({...formData, volumeM3: parseFloat(e.target.value) || '' as any})}
+                min="0"
+                value={formData.volumeM3 === undefined || formData.volumeM3 === null ? '' : formData.volumeM3} 
+                onChange={e => setFormData({...formData, volumeM3: e.target.value === '' ? '' : parseFloat(e.target.value)})}
                 className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 font-mono"
                 placeholder="0.00"
               />
@@ -243,7 +311,7 @@ export function Inventory() {
           
           <div className="mt-6 flex justify-end gap-3">
             <button 
-              onClick={() => setShowForm(false)}
+              onClick={() => { setShowForm(false); setEditingProduct(null); }}
               className="px-4 py-2 border border-slate-200 rounded-lg text-slate-600 font-medium hover:bg-slate-50"
             >
               Cancel
@@ -301,7 +369,13 @@ export function Inventory() {
 
               return (
                 <tr key={p.sku} className="hover:bg-slate-50 transition-colors group relative">
-                  <td className="px-6 py-4 text-sm font-bold text-blue-700 font-mono tracking-tight cursor-pointer" onClick={() => handleEditClick(p)}>{p.sku}</td>
+                  {/* Klik SKU hanya berfungsi sebagai tombol edit jika user merupakan Super Admin */}
+                  <td 
+                    className={`px-6 py-4 text-sm font-bold text-blue-700 font-mono tracking-tight ${isSuperAdmin ? 'cursor-pointer hover:underline' : 'cursor-default'}`} 
+                    onClick={() => isSuperAdmin && handleEditClick(p)}
+                  >
+                    {p.sku}
+                  </td>
                   <td className="px-6 py-4 text-sm font-bold text-slate-800">{p.name}</td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-500">{p.category.replace('_', ' ')}</td>
                   <td className="px-6 py-4">
@@ -332,21 +406,36 @@ export function Inventory() {
                       {isSafe ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
                       {isSafe ? 'Stok Aman' : 'Reorder Point'}
                     </span>
-                    <div className="absolute right-6 top-1/2 -translate-y-1/2 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-50 pl-4 py-1">
-                      <button 
-                        onClick={() => handleDelete(p.sku)}
-                        className="p-1.5 text-red-600 hover:bg-red-100 rounded-md transition-colors shadow-sm bg-white border border-red-100"
-                        title="Delete"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    
+                    {/* MENU AKSI OVERLAY (Hanya di-render dan muncul jika user adalah Super Admin) */}
+                    {isSuperAdmin && (
+                      <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-50 pl-4 py-1.5 rounded-l-md z-10">
+                        <button 
+                          onClick={() => handleEditClick(p)}
+                          className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-md transition-colors shadow-sm bg-white border border-blue-200"
+                          title="Edit Product"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button 
+                          onClick={() => handleDelete(p.sku)}
+                          className="p-1.5 text-red-600 hover:bg-red-100 rounded-md transition-colors shadow-sm bg-white border border-red-200"
+                          title="Delete Product"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               );
             })}
             {products.length === 0 && (
-              <tr><td colSpan={7} className="p-12 text-center text-slate-500 font-medium">No products found. Add one or import CSV.</td></tr>
+              <tr>
+                <td colSpan={8} className="p-12 text-center text-slate-500 font-medium">
+                  No products found. Add one or import CSV.
+                </td>
+              </tr>
             )}
           </tbody>
         </table>
