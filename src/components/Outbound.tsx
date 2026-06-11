@@ -89,28 +89,28 @@ export function Outbound() {
     }).catch(console.error);
   }, [selectedSku, locators]);
 
-  // Kalkulasi Auto-Alokasi FIFO Rencana Pengambilan Barang (AI Recommendation Core)
-  useEffect(() => {
-    if (editingManifestId) return; 
-    
+  // Kalkulasi Intuitif Murni untuk Rekomendasi AI (Tidak mengikat state utama secara langsung)
+  const aiRecommendedAllocations = useMemo(() => {
     const qty = parseInt(targetQty);
-    if (!qty || qty <= 0 || availableStock.length === 0) {
-      setAllocations({});
-      return;
-    }
+    if (!qty || qty <= 0 || availableStock.length === 0) return {};
 
     let remaining = qty;
-    const newAlloc: Record<string, number> = {};
+    const recommended: Record<string, number> = {};
 
     for (const stock of availableStock) {
       if (remaining <= 0) break;
       const take = Math.min(stock.available, remaining);
-      newAlloc[stock.locatorId] = take;
+      recommended[stock.locatorId] = take;
       remaining -= take;
     }
+    return recommended;
+  }, [targetQty, availableStock]);
 
-    setAllocations(newAlloc);
-  }, [targetQty, availableStock, editingManifestId]);
+  // Set alokasi otomatis saat target qty berubah pertama kali sebagai baseline rekomendasi awal
+  useEffect(() => {
+    if (editingManifestId) return; 
+    setAllocations(aiRecommendedAllocations);
+  }, [aiRecommendedAllocations, editingManifestId]);
 
   const totalAvailable = useMemo(() => availableStock.reduce((sum, item) => sum + item.available, 0), [availableStock]);
   const totalAllocated = useMemo(() => Object.values(allocations).reduce((sum, qty) => sum + (qty || 0), 0), [allocations]);
@@ -118,19 +118,19 @@ export function Outbound() {
   const isTargetMet = parseInt(targetQty) > 0 && totalAllocated === parseInt(targetQty);
   const isExceedingStock = parseInt(targetQty) > totalAvailable && !editingManifestId;
 
-  // Menghasilkan string rekomendasi alokasi slot dinamis untuk banner AI
+  // Menghasilkan string rekomendasi alokasi slot dinamis untuk banner AI tetap bersih
   const aiRecommendationSlots = useMemo(() => {
     if (!selectedSku) return 'Silakan tentukan SKU material terlebih dahulu';
     if (!targetQty || Number(targetQty) <= 0) return 'Masukkan kuantitas target pick untuk memetakan lokasi';
     
-    const activeSlots = Object.entries(allocations)
+    const activeSlots = Object.entries(aiRecommendedAllocations)
       .filter(([_, qty]) => qty > 0)
       .map(([locId, qty]) => `${locId} (${qty} PCS)`)
       .sort();
 
     if (activeSlots.length === 0) return 'Stok material tidak ditemukan di slot manapun';
     return activeSlots.join(', ');
-  }, [allocations, selectedSku, targetQty]);
+  }, [aiRecommendedAllocations, selectedSku, targetQty]);
 
   const handleReviewPendingGroup = (group: any) => {
     setEditingManifestId(group.manifestId);
@@ -287,7 +287,7 @@ export function Outbound() {
     return Object.values(groups);
   }, [bookedTransactions]);
 
-  // Grouping Utama Semua Riwayat Transaksi Outbound (Menjadi 1 Baris tunggal per Manifest ID)
+  // Grouping Utama Semua Riwayat Transaksi Outbound
   const aggregatedHistoryTransactions = useMemo(() => {
     const groups: Record<string, {
       manifestId: string;
@@ -366,7 +366,7 @@ export function Outbound() {
           </div>
           <div className="bg-[#0055C4] text-white px-3 py-1.5 rounded font-bold text-xs flex items-center gap-1.5 shadow-sm">
             <Zap className="w-3.5 h-3.5 fill-white" />
-            Multi-Rack Pick Active
+            Custom Admin Control Active
           </div>
         </div>
 
@@ -495,10 +495,10 @@ export function Outbound() {
             </div>
           </section>
 
-          {/* AI Recommendation Section Panel */}
-          <section className="col-span-12 lg:col-span-7 flex flex-col justify-start">
+          {/* AI Recommendation & Custom Selection Panel */}
+          <section className="col-span-12 lg:col-span-7 flex flex-col justify-start space-y-4">
             
-            {/* TAMPILAN BANNER AI RECOMMENDATION PERBAIKAN TOTAL */}
+            {/* TAMPILAN BANNER AI RECOMMENDATION */}
             <div className="bg-[#0055C4] text-white rounded-lg p-5 shadow-md flex flex-col justify-center border-l-4 border-emerald-400">
               <div className="flex items-center gap-2">
                 <span className="bg-white/20 text-[9px] font-black px-2 py-0.5 rounded tracking-widest uppercase text-white font-mono">
@@ -512,28 +512,61 @@ export function Outbound() {
                 </span>
               </h3>
               <p className="text-[11px] text-blue-100 mt-2 font-normal">
-                Sistem otomatis memetakan letak rak berdasarkan metode alokasi ketersediaan stok terkini di dalam gudang secara seimbang.
+                Sistem otomatis memetakan rute FIFO ideal berdasarkan data stok terkini. Anda bebas menyesuaikan alokasi nyata di bawah ini.
               </p>
             </div>
 
-            {Object.keys(allocations).length > 0 && (
-              <div className="mt-4 bg-white border border-slate-200 rounded-lg p-4 shadow-sm animate-fadeIn">
-                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">Detail Jalur Pengambilan Barang (Routing):</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {Object.entries(allocations).map(([locId, qty]) => (
-                    qty > 0 && (
-                      <div key={locId} className="flex items-center justify-between p-2.5 border border-slate-100 rounded bg-slate-50/50">
+            {/* FORM ALOKASI MANUAL (ADMIN CONTROL PANEL) */}
+            {availableStock.length > 0 && (
+              <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm animate-fadeIn">
+                <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-100">
+                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Penyesuaian Alokasi Slot Rak Gudang:
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setAllocations(aiRecommendedAllocations)}
+                    className="text-[10px] bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-[#0055C4] hover:border-blue-200 border border-slate-200 px-2 py-1 rounded font-bold transition-all flex items-center gap-1"
+                    title="Gunakan pembagian rute bawaan AI"
+                  >
+                    <RefreshCw className="w-3 h-3" /> Reset ke Rekomendasi AI
+                  </button>
+                </div>
+                
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {availableStock.map((stock) => {
+                    const currentAllocatedQty = allocations[stock.locatorId] || 0;
+                    return (
+                      <div key={stock.locatorId} className="flex items-center justify-between p-3 border border-slate-200 rounded-lg bg-slate-50/40 hover:bg-white transition-all">
                         <div>
-                          <p className="text-[10px] text-slate-400 font-bold uppercase">LOKASI RAK</p>
-                          <p className="text-xs font-mono font-black text-slate-800">SLOT {locId}</p>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">LOKASI SLOT</p>
+                          <p className="text-xs font-mono font-black text-slate-800">SLOT {stock.locatorId}</p>
+                          <p className="text-[11px] text-slate-500 font-medium">
+                            Stok Tersedia: <span className="font-bold text-slate-700">{stock.available} PCS</span>
+                          </p>
                         </div>
-                        <div className="text-right">
-                          <p className="text-[10px] text-slate-400 font-bold uppercase">AMBIL QUANTITY</p>
-                          <p className="text-xs font-mono font-black text-red-600">-{qty} PCS</p>
+                        <div className="text-right flex items-center gap-1.5">
+                          <input 
+                            type="number" 
+                            min="0"
+                            max={stock.available}
+                            value={currentAllocatedQty || ''}
+                            placeholder="0"
+                            onChange={e => {
+                              const inputVal = parseInt(e.target.value) || 0;
+                              const safeVal = Math.min(stock.available, Math.max(0, inputVal));
+                              setAllocations(prev => ({
+                                ...prev,
+                                [stock.locatorId]: safeVal
+                              }));
+                            }}
+                            className="w-20 p-1.5 border border-slate-300 rounded text-xs font-mono font-black text-center text-red-600 outline-none focus:border-red-500 bg-white shadow-inner"
+                          />
+                          <span className="text-[10px] font-bold text-slate-400 font-mono">PCS</span>
                         </div>
                       </div>
-                    )
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -688,7 +721,7 @@ export function Outbound() {
           </section>
         )}
 
-        {/* SEMUA RIWAYAT TRANSAKSI OUTBOUND (KONSOLIDASI SINGLE RECORD) */}
+        {/* SEMUA RIWAYAT TRANSAKSI OUTBOUND */}
         <section className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
           <div className="flex justify-between items-center mb-4">
             <div>
