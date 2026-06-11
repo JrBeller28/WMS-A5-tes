@@ -42,16 +42,27 @@ export function Inbound() {
     }).catch(console.error);
   };
 
+  const productDetails = products.find(p => p.sku === selectedSku);
+
+  // 1. FILTER: Hanya ambil locators yang sesuai dengan kategori produk (jika SKU sudah dipilih)
+  const compatibleLocators = locators.filter(l => {
+    if (!productDetails?.category) return true;
+    return l.zone === productDetails.category;
+  });
+
   const handleRecommend = async () => {
     if (!selectedSku || !qty) return;
     setLoading(true);
     try {
       const recs = await getPutawayRecommendations(selectedSku, Number(qty));
-      setRecommendations(recs);
-      if (recs.length > 0) {
-        setSelectedLocator(recs[0].id);
+      // Filter rekomendasi berdasarkan kategori juga
+      const filteredRecs = recs.filter(r => !productDetails?.category || r.zone === productDetails.category);
+      setRecommendations(filteredRecs);
+      
+      if (filteredRecs.length > 0) {
+        setSelectedLocator(filteredRecs[0].id);
       } else {
-        setMessage({ type: 'error', text: 'No suitable locators found.' });
+        setMessage({ type: 'error', text: 'No suitable locators found for this category.' });
       }
     } catch (e: any) {
       setMessage({ type: 'error', text: e.message || 'Error fetching recommendations' });
@@ -66,22 +77,76 @@ export function Inbound() {
     return () => clearTimeout(timer);
   }, [selectedSku, qty]);
 
+  const getSlotStat = (locId: string) => {
+    let usedVol = 0;
+    const items: any[] = [];
+    
+    // Hitung inventory yang sudah ada
+    Object.entries(inventory).forEach(([sku, data]: [string, any]) => {
+      const pData = products.find(p => p.sku === sku);
+      const locQty = data.locators[locId]?.physicalQty || 0;
+      if (locQty > 0 && pData) {
+        usedVol += locQty * pData.volumeM3;
+        items.push({ sku, qty: locQty });
+      }
+    });
+    
+    // Tambahkan list pending dari keranjang inbound
+    inboundList.filter(i => i.locatorId === locId).forEach(pendingItem => {
+      const pData = products.find(p => p.sku === pendingItem.sku);
+      if (pData) usedVol += pendingItem.qty * pData.volumeM3;
+      const existing = items.find(i => i.sku === pendingItem.sku);
+      if (existing) existing.qty += pendingItem.qty;
+      else items.push({ sku: pendingItem.sku, qty: pendingItem.qty });
+    });
+
+    // Simulasi penambahan volume untuk slot yang sedang di-select di form saat ini
+    if (locId === selectedLocator && productDetails && Number(qty) > 0) {
+       usedVol += Number(qty) * productDetails.volumeM3;
+       const existing = items.find(i => i.sku === selectedSku);
+       if (existing) existing.qty += Number(qty);
+       else items.push({ sku: selectedSku, qty: Number(qty) });
+    }
+    
+    const maxVol = locators.find(r => r.id === locId)?.maxVolumeM3 || 5.4;
+    const pct = Math.min(100, Math.round((usedVol / maxVol) * 100));
+    return { usedVol, maxVol, pct, items };
+  };
+
   const handleAddToList = () => {
     if (!selectedSku || !qty || !selectedLocator) {
       setMessage({ type: 'error', text: 'Please complete all fields' });
       return;
     }
+
+    // 2. VALIDASI: Cek apakah penambahan ini melampaui kapasitas rak
+    const stat = getSlotStat(selectedLocator);
+    if (stat.usedVol > stat.maxVol) {
+      // Hitung sisa ruang secara akurat tanpa memasukkan qty inputan saat ini
+      const projectedOverfill = stat.usedVol - stat.maxVol;
+      const availableVol = (Number(qty) * (productDetails?.volumeM3 || 1)) - projectedOverfill;
+      const maxQtyAllowed = Math.floor(availableVol / (productDetails?.volumeM3 || 1));
+      
+      setMessage({ 
+        type: 'error', 
+        text: `Volume exceeds Rack capacity! Max allowed for this slot is ${maxQtyAllowed} units.` 
+      });
+      return;
+    }
+
     setInboundList([...inboundList, {
       id: uuidv4(),
       sku: selectedSku,
       qty: Math.abs(Number(qty)),
       locatorId: selectedLocator
     }]);
+    
+    // 3. SPLIT PUTAWAY: Kosongkan qty dan locator, tapi BIARKAN SKU tetap terpilih
     setQty('');
-    setSelectedSku('');
+    setSelectedLocator('');
     setRecommendations([]);
-    setMessage({ type: 'success', text: 'Added to Putaway List' });
-    setTimeout(() => setMessage(null), 2000);
+    setMessage({ type: 'success', text: 'Added to list. Select next rack for remaining items if needed.' });
+    setTimeout(() => setMessage(null), 3000);
   };
 
   const handleConfirmAll = async () => {
@@ -103,6 +168,7 @@ export function Inbound() {
       }
       setMessage({ type: 'success', text: 'Batch putaway complete!' });
       setInboundList([]);
+      setSelectedSku(''); // Reset SKU setelah batch selesai
       fetchTransactions();
       setTimeout(() => setMessage(null), 3000);
     } catch (e) {
@@ -110,56 +176,23 @@ export function Inbound() {
     }
   };
 
-  const productDetails = products.find(p => p.sku === selectedSku);
   const recommendedLoc = recommendations.find(r => r.id === selectedLocator) || recommendations[0];
 
-  // For visual grid
+  // Visual grid menggunakan locators yang sudah difilter kategori
   let rack = 'FL-A';
-  const selectedLocData = locators.find(l => l.id === selectedLocator);
+  const selectedLocData = compatibleLocators.find(l => l.id === selectedLocator);
   if (selectedLocData) {
     rack = selectedLocData.rack;
   } else if (recommendedLoc) {
     rack = recommendedLoc.rack;
+  } else if (compatibleLocators.length > 0) {
+    rack = compatibleLocators[0].rack;
   }
   
-  const rackLocators = locators.filter(l => l.rack === rack);
+  const rackLocators = compatibleLocators.filter(l => l.rack === rack);
   const columns = Array.from(new Set(rackLocators.map(l => l.column))).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   const maxLevel = rack.startsWith('FL') ? 2 : (rackLocators.length > 0 ? Math.max(...rackLocators.map(l => l.level)) : 4);
   const levels = Array.from({length: maxLevel}, (_, i) => maxLevel - i);
-
-  const getSlotStat = (locId: string) => {
-    let usedVol = 0;
-    const items: any[] = [];
-    Object.entries(inventory).forEach(([sku, data]: [string, any]) => {
-      const pData = products.find(p => p.sku === sku);
-      const qty = data.locators[locId]?.physicalQty || 0;
-      if (qty > 0 && pData) {
-        usedVol += qty * pData.volumeM3;
-        items.push({ sku, qty });
-      }
-    });
-    
-    // Virtual future addition from pending list
-    inboundList.filter(i => i.locatorId === locId).forEach(pendingItem => {
-      const pData = products.find(p => p.sku === pendingItem.sku);
-      if (pData) usedVol += pendingItem.qty * pData.volumeM3;
-      const existing = items.find(i => i.sku === pendingItem.sku);
-      if (existing) existing.qty += pendingItem.qty;
-      else items.push({ sku: pendingItem.sku, qty: pendingItem.qty });
-    });
-
-    // Virtual future addition for the currently selected slot in form
-    if (locId === selectedLocator && productDetails && Number(qty) > 0) {
-       usedVol += Number(qty) * productDetails.volumeM3;
-       const existing = items.find(i => i.sku === selectedSku);
-       if (existing) existing.qty += Number(qty);
-       else items.push({ sku: selectedSku, qty: Number(qty) });
-    }
-    
-    const maxVol = rackLocators.find(r => r.id === locId)?.maxVolumeM3 || 5.4;
-    const pct = Math.min(100, Math.round((usedVol / maxVol) * 100));
-    return { usedVol, maxVol, pct, items };
-  };
 
   const getUtilColor = (pct: number) => {
     if (pct >= 95) return 'bg-rose-500';
@@ -197,7 +230,11 @@ export function Inbound() {
               <div className="relative">
                 <select 
                   value={selectedSku} 
-                  onChange={e => setSelectedSku(e.target.value)}
+                  onChange={e => {
+                    setSelectedSku(e.target.value);
+                    setQty('');
+                    setSelectedLocator('');
+                  }}
                   className="w-full p-2.5 border border-slate-300 rounded text-sm text-slate-800 bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none appearance-none"
                 >
                   <option value="">Scan or Select SKU</option>
@@ -213,16 +250,17 @@ export function Inbound() {
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm text-[#475569] mb-1.5 font-medium">Quantity (Units)</label>
+                <label className="block text-sm text-[#475569] mb-1.5 font-medium">Qty for this Rack</label>
                 <input 
                   type="number" 
                   value={qty}
                   onChange={e => setQty(e.target.value)}
+                  placeholder="e.g. 50"
                   className="w-full p-2.5 border border-slate-300 rounded text-sm text-slate-800 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
               </div>
               <div>
-                 <label className="block text-sm text-[#475569] mb-1.5 font-medium">Volume (m³)</label>
+                 <label className="block text-sm text-[#475569] mb-1.5 font-medium">Est. Volume (m³)</label>
                 <input 
                   type="text" 
                   value={productDetails && qty ? (productDetails.volumeM3 * Number(qty)).toFixed(2) : ''}
@@ -234,13 +272,14 @@ export function Inbound() {
 
             <div>
               <label className="block text-sm text-[#475569] mb-1.5 font-medium">Handling Category</label>
-              <select className="w-full p-2.5 border border-slate-300 rounded text-sm text-slate-800 bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none">
-                <option>{productDetails?.category ? productDetails.category.replace('_', ' ') + ' - Heavy Duty' : 'Standard'}</option>
+              <select disabled className="w-full p-2.5 border border-slate-300 rounded text-sm text-slate-500 bg-slate-50 outline-none">
+                <option>{productDetails?.category ? productDetails.category.replace('_', ' ') : 'Standard'}</option>
               </select>
             </div>
             
             {message && (
-              <div className={`p-3 rounded text-xs font-bold ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
+              <div className={`p-3 rounded text-xs font-bold ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700 flex items-start gap-2'}`}>
+                {message.type === 'error' && <AlertCircle className="w-4 h-4 shrink-0" />}
                 {message.text}
               </div>
             )}
@@ -288,7 +327,6 @@ export function Inbound() {
           
           {/* AI Recommendation Panel */}
           <div className="bg-[#0b5cd5] text-white rounded-lg p-6 shadow-sm relative overflow-hidden">
-             {/* Background decorative elements */}
              <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-white/10 to-transparent pointer-events-none"></div>
              
              <div className="flex justify-between items-start mb-6">
@@ -347,15 +385,13 @@ export function Inbound() {
                  <select 
                    value={rack} 
                    onChange={(e) => {
-                     const firstLoc = locators.find(l => l.rack === e.target.value);
+                     const firstLoc = compatibleLocators.find(l => l.rack === e.target.value);
                      if (firstLoc) setSelectedLocator(firstLoc.id);
                    }}
                    className="p-1 ml-2 border border-slate-200 rounded text-sm bg-slate-50 text-slate-800 font-bold outline-none"
                  >
-                   {Array.from(new Set(locators.map(l => l.rack))).map(r => {
-                     
-                      
-                     const rLocs = locators.filter(l => l.rack === r);
+                   {Array.from(new Set(compatibleLocators.map(l => l.rack))).map(r => {
+                     const rLocs = compatibleLocators.filter(l => l.rack === r);
                      const maxVol = rLocs.reduce((sum, l) => sum + l.maxVolumeM3, 0);
                      return <option key={r} value={r}>Rack {r} (Capacity: {maxVol.toFixed(1)} m³)</option>
                    })}
@@ -375,6 +411,10 @@ export function Inbound() {
                      <div className="flex-1 flex gap-4 justify-between">
                        {columns.map(c => {
                          const locId = `${c}.${lvl}`;
+                         // Pengecekan aman, memastikan locId valid di dalam zona yang sedang difilter
+                         const isValidLoc = rackLocators.some(l => l.id === locId);
+                         if (!isValidLoc) return <div key={c} className="w-32 flex-shrink-0" />;
+
                          const isTarget = locId === selectedLocator;
                          const stat = getSlotStat(locId);
                          const isVacant = stat.pct === 0 && !isTarget;
@@ -412,7 +452,7 @@ export function Inbound() {
                                {/* Progress bar */}
                                <div className="mt-2">
                                  <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
-                                   <div className={`h-full transition-all duration-500 ${isTarget ? 'bg-rose-500' : getUtilColor(stat.pct)}`} style={{ width: `${stat.pct}%` }}></div>
+                                   <div className={`h-full transition-all duration-500 ${stat.pct > 100 ? 'bg-red-600' : getUtilColor(stat.pct)}`} style={{ width: `${Math.min(stat.pct, 100)}%` }}></div>
                                  </div>
                                  <div className="flex justify-between items-center mt-1">
                                    <span className="text-[8px] font-mono font-medium text-slate-500">{stat.usedVol.toFixed(2)} m³</span>
@@ -438,7 +478,7 @@ export function Inbound() {
 
              <div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center">
                <span className="text-[10px] font-mono font-medium text-slate-400 uppercase tracking-widest">
-                  Rack Sill Beam Capacity: 5.4 m³ Max
+                 Rack Sill Beam Capacity Dynamic
                </span>
                <span className="text-[10px] font-bold italic text-slate-500">Selected Target: {selectedLocator || '-'}</span>
              </div>
@@ -492,4 +532,3 @@ export function Inbound() {
     </div>
   );
 }
-
