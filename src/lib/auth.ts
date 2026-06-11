@@ -1,3 +1,7 @@
+import { doc, setDoc } from 'firebase/firestore';
+import { db } from '../firebase';
+import { v4 as uuidv4 } from 'uuid';
+
 export const USERS = [
   { username: 'adminA5', password: 'admin123', role: 'Admin A5', name: 'Iwan Gunawan' },
   { username: 'petugasA5', password: 'petugas123', role: 'Petugas', name: 'Arief Nugroho' },
@@ -5,13 +9,20 @@ export const USERS = [
   { username: 'admin', password: 'admin123', role: 'Super Admin', name: 'HQ Warehouse' }
 ];
 
-export const loginUser = (username: string, password: string) => {
+export const loginUser = async (username: string, password: string) => {
   const user = USERS.find(u => u.username === username && u.password === password);
   if (user) {
+    const sessionId = uuidv4();
+    await setDoc(doc(db, 'sessions', user.username), {
+      sessionId,
+      lastActive: new Date().toISOString()
+    });
+
     localStorage.setItem('currentUser', JSON.stringify({
        username: user.username,
        role: user.role,
-       name: user.name
+       name: user.name,
+       sessionId
     }));
     return user;
   }

@@ -6,7 +6,9 @@
 import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Layout } from './components/Layout';
 import { seedDatabase } from './lib/db';
-import { getCurrentUser } from './lib/auth';
+import { getCurrentUser, logoutUser } from './lib/auth';
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from './firebase';
 
 // Lazy loading components to optimize performance limit JS initial payload
 const Dashboard = lazy(() => import('./components/Dashboard').then(module => ({ default: module.Dashboard })));
@@ -21,12 +23,40 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState(''); // 1. Tambahkan state untuk menampung kata kunci pencarian
   const [init, setInit] = useState(false);
-  const [user, setUser] = useState<{username: string, role: string, name: string} | null>(null);
+  const [user, setUser] = useState<{username: string, role: string, name: string, sessionId?: string} | null>(null);
 
   useEffect(() => {
     setUser(getCurrentUser());
     seedDatabase().then(() => setInit(true)).catch(() => setInit(true));
   }, []);
+
+  // Monitor concurrent login
+  useEffect(() => {
+    if (!user) return; 
+
+    if (user.sessionId) {
+      const unsubscribe = onSnapshot(doc(db, 'sessions', user.username), (doc) => {
+        if (doc.exists()) {
+          const data = doc.data();
+          if (data.sessionId !== user.sessionId) {
+            // Sesi baru terdeteksi, logout otomatis
+            logoutUser();
+            setUser(null);
+            alert("Sesi telah berakhir atau Anda telah login di perangkat lain.");
+          }
+        } else {
+           // Document doesn't exist, invalid session
+           logoutUser();
+           setUser(null);
+        }
+      });
+      return () => unsubscribe();
+    } else {
+      // Security feature: reject injected localstorage without sessionId
+      logoutUser();
+      setUser(null);
+    }
+  }, [user]);
 
   const LoadingFallback = () => (
     <div className="flex items-center justify-center p-12 text-slate-400">

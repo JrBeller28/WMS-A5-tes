@@ -7,10 +7,10 @@ export const Login = ({ onLogin }: { onLogin: () => void }) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      loginUser(username, password);
+      await loginUser(username, password);
       onLogin();
     } catch (err: any) {
       setError(err.message);
