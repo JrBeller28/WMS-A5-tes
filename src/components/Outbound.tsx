@@ -44,20 +44,27 @@ export function Outbound() {
 
   const refreshTransactionsData = () => {
     getTransactions().then(txs => {
-        const outboundTxs = txs.filter(tx => tx.type === 'OUTBOUND');
+        // PERBAIKAN: Memastikan data transaksi yang didapat berbentuk array
+        const safeTxs = Array.isArray(txs) ? txs : [];
+        const outboundTxs = safeTxs.filter(tx => tx && tx.type === 'OUTBOUND');
         setAllOutboundTransactions(outboundTxs.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
-        setBookedTransactions(outboundTxs.filter(tx => tx.status === 'BOOKED'));
-    }).catch(console.error);
+        setBookedTransactions(outboundTxs.filter(tx => tx && tx.status === 'BOOKED'));
+    }).catch((err) => {
+        console.error(err);
+        setAllOutboundTransactions([]);
+        setBookedTransactions([]);
+    });
   };
 
   useEffect(() => {
-    getProducts().then(setProducts).catch(console.error);
-    getLocators().then(setLocators).catch(console.error);
+    // PERBAIKAN: Proteksi fallback jika kembalian database bernilai null/undefined
+    getProducts().then(prods => setProducts(Array.isArray(prods) ? prods : [])).catch(console.error);
+    getLocators().then(locs => setLocators(Array.isArray(locs) ? locs : [])).catch(console.error);
     refreshTransactionsData();
   }, []);
 
   // Memeriksa status kevalidan volume produk secara global di dalam komponen
-  const productDetails = products.find(p => p.sku === selectedSku);
+  const productDetails = (products || []).find(p => p && p.sku === selectedSku);
   const isVolumeInvalid = selectedSku && (!productDetails || productDetails.volumeM3 === undefined || productDetails.volumeM3 === null || productDetails.volumeM3 <= 0);
 
   // Ambil data ketersediaan stok material di gudang secara real-time berdasarkan SKU terpilih
@@ -83,19 +90,21 @@ export function Outbound() {
     }
 
     getTransactions().then(txs => {
+      const safeTxs = Array.isArray(txs) ? txs : [];
       const locatorStock: Record<string, number> = {};
-      for (const tx of txs) {
-        if (tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
+      
+      for (const tx of safeTxs) {
+        if (!tx || tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
         if (tx.sku === selectedSku) {
           if (!locatorStock[tx.locatorId]) locatorStock[tx.locatorId] = 0;
-          locatorStock[tx.locatorId] += tx.qty; 
+          locatorStock[tx.locatorId] += (tx.qty || 0); 
         }
       }
       
       const available = Object.entries(locatorStock)
         .filter(([_, qty]) => qty > 0)
         .map(([locId, qty]) => {
-          const locInfo = locators.find(l => l.id === locId);
+          const locInfo = (locators || []).find(l => l && l.id === locId);
           return { locatorId: locId, available: qty, rack: locInfo ? locInfo.rack : '-' };
         });
         
@@ -104,13 +113,16 @@ export function Outbound() {
       if (!editingManifestId) {
         setAllocations({});
       }
-    }).catch(console.error);
+    }).catch((err) => {
+      console.error(err);
+      setAvailableStock([]);
+    });
   }, [selectedSku, locators, isVolumeInvalid]);
 
   // Kalkulasi Intuitif Murni untuk Rekomendasi AI
   const aiRecommendedAllocations = useMemo(() => {
     const qty = parseInt(targetQty);
-    if (!qty || qty <= 0 || availableStock.length === 0 || isVolumeInvalid) return {};
+    if (!qty || qty <= 0 || !availableStock || availableStock.length === 0 || isVolumeInvalid) return {};
 
     let remaining = qty;
     const recommended: Record<string, number> = {};
@@ -127,11 +139,11 @@ export function Outbound() {
   // Set alokasi otomatis saat target qty berubah pertama kali sebagai baseline rekomendasi awal
   useEffect(() => {
     if (editingManifestId) return; 
-    setAllocations(aiRecommendedAllocations);
+    setAllocations(aiRecommendedAllocations || {});
   }, [aiRecommendedAllocations, editingManifestId]);
 
-  const totalAvailable = useMemo(() => availableStock.reduce((sum, item) => sum + item.available, 0), [availableStock]);
-  const totalAllocated = useMemo(() => Object.values(allocations).reduce((sum, qty) => sum + (qty || 0), 0), [allocations]);
+  const totalAvailable = useMemo(() => (availableStock || []).reduce((sum, item) => sum + (item?.available || 0), 0), [availableStock]);
+  const totalAllocated = useMemo(() => Object.values(allocations || {}).reduce((sum, qty) => sum + (qty || 0), 0), [allocations]);
   const unallocatedQty = Math.max(0, Number(targetQty || 0) - totalAllocated);
   const isTargetMet = parseInt(targetQty) > 0 && totalAllocated === parseInt(targetQty);
   const isExceedingStock = parseInt(targetQty) > totalAvailable && !editingManifestId;
@@ -142,7 +154,7 @@ export function Outbound() {
     if (isVolumeInvalid) return 'Barang tidak valid (volume kosong). Hubungi Super Admin.';
     if (!targetQty || Number(targetQty) <= 0) return 'Masukkan kuantitas target pick untuk memetakan lokasi';
     
-    const activeSlots = Object.entries(aiRecommendedAllocations)
+    const activeSlots = Object.entries(aiRecommendedAllocations || {})
       .filter(([_, qty]) => qty > 0)
       .map(([locId, qty]) => `${locId} (${qty} PCS)`)
       .sort();
@@ -152,15 +164,18 @@ export function Outbound() {
   }, [aiRecommendedAllocations, selectedSku, targetQty, isVolumeInvalid]);
 
   const handleReviewPendingGroup = (group: any) => {
+    if (!group) return;
     setEditingManifestId(group.manifestId);
     setSelectedSku(group.sku);
-    setTargetQty(group.totalQty.toString());
+    setTargetQty(group.totalQty ? group.totalQty.toString() : '0');
     setMemo(group.memo || '');
     
     const newAllocations: Record<string, number> = {};
-    group.items.forEach((item: any) => {
-      newAllocations[item.locatorId] = Math.abs(item.qty);
-    });
+    if (Array.isArray(group.items)) {
+      group.items.forEach((item: any) => {
+        if (item) newAllocations[item.locatorId] = Math.abs(item.qty || 0);
+      });
+    }
     setAllocations(newAllocations);
 
     setMessage({ type: 'success', text: 'Data grup berhasil dimuat ke dalam form pembungkusan.' });
@@ -192,15 +207,15 @@ export function Outbound() {
     
     try {
       if (editingManifestId) {
-        const oldTransactions = bookedTransactions.filter(tx => tx.manifestId === editingManifestId);
+        const oldTransactions = (bookedTransactions || []).filter(tx => tx && tx.manifestId === editingManifestId);
         for (const oldTx of oldTransactions) {
-          await updateTransactionStatus(oldTx.id, 'CANCELLED');
+          if (oldTx) await updateTransactionStatus(oldTx.id, 'CANCELLED');
         }
       }
 
       const activeManifestId = editingManifestId || 'MFS-OUT-' + uuidv4().slice(0,8).toUpperCase();
       
-      for (const [locatorId, pickQty] of Object.entries(allocations)) {
+      for (const [locatorId, pickQty] of Object.entries(allocations || {})) {
         if (pickQty > 0) {
           const tx = {
             id: uuidv4(),
@@ -236,27 +251,28 @@ export function Outbound() {
   };
 
   const handleConfirmAllManifest = async () => {
-    if (bookedTransactions.length === 0) return;
+    if (!bookedTransactions || bookedTransactions.length === 0) return;
     try {
       const user = getCurrentUser();
       const operatorName = user ? user.name : 'IWAN GUNAWAN';
       const now = new Date();
       const formattedDate = `${now.getDate()}/${now.getMonth() + 1}/${String(now.getFullYear()).slice(-2)}, ${String(now.getHours()).padStart(2, '0')}.${String(now.getMinutes()).padStart(2, '0')}.${String(now.getSeconds()).padStart(2, '0')}`;
 
-      const primaryManifestId = bookedTransactions[0].manifestId || 'MFS-OUT-' + uuidv4().slice(0,8).toUpperCase();
+      const primaryManifestId = bookedTransactions[0]?.manifestId || 'MFS-OUT-' + uuidv4().slice(0,8).toUpperCase();
 
       const rows = bookedTransactions.map(tx => {
-        const prod = products.find(p => p.sku === tx.sku);
+        if (!tx) return null;
+        const prod = (products || []).find(p => p && p.sku === tx.sku);
         return {
           sku: tx.sku,
           name: prod ? prod.name : 'Unknown Product',
-          qty: Math.abs(tx.qty),
+          qty: Math.abs(tx.qty || 0),
           locatorId: tx.locatorId
         };
-      });
+      }).filter(Boolean);
 
       for (const tx of bookedTransactions) {
-        await updateTransactionStatus(tx.id, 'CONFIRMED');
+        if (tx) await updateTransactionStatus(tx.id, 'CONFIRMED');
       }
 
       setReceiptPreview({
@@ -264,7 +280,7 @@ export function Outbound() {
         rows,
         operator: operatorName,
         date: formattedDate,
-        memo: bookedTransactions[0].memo || '-'
+        memo: bookedTransactions[0]?.memo || '-'
       });
 
       setEditingManifestId(null);
@@ -294,7 +310,8 @@ export function Outbound() {
       operator: string;
     }> = {};
 
-    bookedTransactions.forEach(tx => {
+    (bookedTransactions || []).forEach(tx => {
+      if (!tx) return;
       const groupKey = tx.manifestId || `${tx.sku}-${tx.timestamp}`;
       if (!groups[groupKey]) {
         groups[groupKey] = {
@@ -307,7 +324,7 @@ export function Outbound() {
           operator: tx.operator || 'SYSTEM'
         };
       }
-      groups[groupKey].totalQty += Math.abs(tx.qty);
+      groups[groupKey].totalQty += Math.abs(tx.qty || 0);
       groups[groupKey].items.push(tx);
     });
 
@@ -317,7 +334,7 @@ export function Outbound() {
   // Grouping Utama Semua Riwayat Transaksi Outbound (FIXED UNIQUE KEY)
   const aggregatedHistoryTransactions = useMemo(() => {
     const groups: Record<string, {
-      id: string; // Menampung key unik asli transaksi
+      id: string; 
       manifestId: string;
       timestamp: string;
       sku: string;
@@ -329,11 +346,12 @@ export function Outbound() {
       rawItems: any[];
     }> = {};
 
-    allOutboundTransactions.forEach(tx => {
+    (allOutboundTransactions || []).forEach(tx => {
+      if (!tx) return;
       const key = tx.manifestId || tx.id;
       if (!groups[key]) {
         groups[key] = {
-          id: key, // Menyimpan id pembeda unik agar tidak duplikat saat loop rendering
+          id: key, 
           manifestId: tx.manifestId || '-',
           timestamp: tx.timestamp,
           sku: tx.sku,
@@ -349,7 +367,7 @@ export function Outbound() {
       if (tx.locatorId && !groups[key].locatorsList.includes(tx.locatorId)) {
         groups[key].locatorsList.push(tx.locatorId);
       }
-      groups[key].totalQty += Math.abs(tx.qty);
+      groups[key].totalQty += Math.abs(tx.qty || 0);
       groups[key].rawItems.push(tx);
     });
 
@@ -357,18 +375,20 @@ export function Outbound() {
   }, [allOutboundTransactions]);
 
   const handlePreviewHistorical = (group: any) => {
+    if (!group) return;
     const txDate = new Date(group.timestamp);
     const formattedDate = `${txDate.getDate()}/${txDate.getMonth() + 1}/${String(txDate.getFullYear()).slice(-2)}, ${String(txDate.getHours()).padStart(2, '0')}.${String(txDate.getMinutes()).padStart(2, '0')}.${String(txDate.getSeconds()).padStart(2, '0')}`;
 
-    const rows = group.rawItems.map((item: any) => {
-      const prod = products.find(p => p.sku === item.sku);
+    const rows = (group.rawItems || []).map((item: any) => {
+      if (!item) return null;
+      const prod = (products || []).find(p => p && p.sku === item.sku);
       return {
         sku: item.sku,
         name: prod ? prod.name : 'Unknown Product',
-        qty: Math.abs(item.qty),
+        qty: Math.abs(item.qty || 0),
         locatorId: item.locatorId
       };
-    });
+    }).filter(Boolean);
 
     setReceiptPreview({
       manifestId: group.manifestId,
@@ -424,7 +444,7 @@ export function Outbound() {
                     className="w-full p-2 border border-slate-300 rounded text-xs bg-white outline-none focus:border-[#0055C4] font-medium"
                   >
                     <option value="">-- Pilih SKU Material --</option>
-                    {products.map(p => (
+                    {(products || []).map(p => p && (
                       <option key={p.sku} value={p.sku}>{p.sku} - {p.name}</option>
                     ))}
                   </select>
@@ -505,11 +525,11 @@ export function Outbound() {
                 {editingManifestId ? 'Perbarui Alokasi Manifes' : 'Simpan Alokasi Pick Ke Manifes'}
               </button>
 
-              {bookedTransactions.length > 0 && (
+              {(bookedTransactions || []).length > 0 && (
                 <div className="pt-2 border-t border-dashed border-slate-200 mt-2">
                   <div className="flex justify-between items-center mb-2">
                     <h4 className="text-[10px] font-black text-slate-600 uppercase">Antrean Manifest Pick:</h4>
-                    <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[9px] font-bold rounded">{bookedTransactions.length} Items</span>
+                    <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[9px] font-bold rounded">{(bookedTransactions || []).length} Items</span>
                   </div>
                   <button 
                     onClick={handleConfirmAllManifest}
@@ -543,7 +563,7 @@ export function Outbound() {
             </div>
 
             {/* FORM ALOKASI MANUAL (ADMIN CONTROL PANEL) */}
-            {availableStock.length > 0 && !isVolumeInvalid && (
+            {(availableStock || []).length > 0 && !isVolumeInvalid && (
               <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm animate-fadeIn">
                 <div className="flex justify-between items-center mb-3 pb-2 border-b border-slate-100">
                   <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider">
@@ -551,7 +571,7 @@ export function Outbound() {
                   </h4>
                   <button
                     type="button"
-                    onClick={() => setAllocations(aiRecommendedAllocations)}
+                    onClick={() => setAllocations(aiRecommendedAllocations || {})}
                     className="text-[10px] bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-[#0055C4] hover:border-blue-200 border border-slate-200 px-2 py-1 rounded font-bold transition-all flex items-center gap-1"
                   >
                     <RefreshCw className="w-3 h-3" /> Reset ke Rekomendasi AI
@@ -559,7 +579,8 @@ export function Outbound() {
                 </div>
                 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {availableStock.map((stock) => {
+                  {(availableStock || []).map((stock) => {
+                    if (!stock) return null;
                     const currentAllocatedQty = allocations[stock.locatorId] || 0;
                     return (
                       <div key={stock.locatorId} className="flex items-center justify-between p-3 border border-slate-200 rounded-lg bg-slate-50/40 hover:bg-white transition-all">
@@ -655,14 +676,17 @@ export function Outbound() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-dashed divide-slate-300">
-                  {receiptPreview.rows.map((item, idx) => (
-                    <tr key={idx} className="align-top">
-                      <td className="py-1.5 font-bold break-all pr-1">{item.sku}</td>
-                      <td className="py-1.5 truncate max-w-[90px] pr-1 normal-case">{item.name}</td>
-                      <td className="py-1.5 text-center font-black text-slate-950">{item.qty} PCS</td>
-                      <td className="py-1.5 text-right font-bold text-blue-600">{item.locatorId}</td>
-                    </tr>
-                  ))}
+                  {Array.isArray(receiptPreview.rows) && receiptPreview.rows.map((item, idx) => {
+                    if (!item) return null;
+                    return (
+                      <tr key={idx} className="align-top">
+                        <td className="py-1.5 font-bold break-all pr-1">{item.sku}</td>
+                        <td className="py-1.5 truncate max-w-[90px] pr-1 normal-case">{item.name}</td>
+                        <td className="py-1.5 text-center font-black text-slate-950">{item.qty} PCS</td>
+                        <td className="py-1.5 text-right font-bold text-blue-600">{item.locatorId}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
 
@@ -683,7 +707,7 @@ export function Outbound() {
         )}
 
         {/* ANTREAN PENDING MANIFEST */}
-        {groupedPendingTransactions.length > 0 && (
+        {(groupedPendingTransactions || []).length > 0 && (
           <section className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
             <div className="mb-4">
               <h3 className="text-sm font-bold text-[#0055C4] uppercase tracking-wider flex items-center gap-1.5">
@@ -705,40 +729,46 @@ export function Outbound() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {groupedPendingTransactions.map((group) => (
-                    <tr key={group.manifestId} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="p-2.5 whitespace-nowrap font-sans text-slate-500">
-                        {new Date(group.timestamp).toLocaleString('id-ID')}
-                      </td>
-                      <td className="p-2.5 font-mono font-bold text-blue-700">{group.sku}</td>
-                      <td className="p-2.5 font-mono text-slate-600">
-                        <div className="flex flex-wrap gap-1">
-                          {group.items.map((item, idx) => (
-                            <span key={idx} className="bg-slate-100 text-slate-700 text-[10px] px-1.5 py-0.5 rounded border border-slate-200 font-bold">
-                              {item.locatorId} ({Math.abs(item.qty)})
-                            </span>
-                          ))}
-                        </div>
-                      </td>
-                      <td className="p-2.5 text-center font-bold text-blue-700">{group.totalQty} PCS</td>
-                      <td className="p-2.5 text-slate-600 uppercase text-[11px]">{group.operator}</td>
-                      <td className="p-2.5 text-center">
-                        <button
-                          onClick={() => handleReviewPendingGroup(group)}
-                          className="inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-[#0055C4] px-2.5 py-1 rounded text-[11px] font-semibold border border-blue-200 transition-colors mr-2"
-                        >
-                          Review Form
-                        </button>
-                        <button
-                          onClick={() => handlePreviewHistorical(group)}
-                          className="inline-flex items-center gap-1 bg-slate-800 text-white hover:bg-slate-900 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors"
-                        >
-                          <Eye className="w-3 h-3" />
-                          Struk
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {groupedPendingTransactions.map((group) => {
+                    if (!group) return null;
+                    return (
+                      <tr key={group.manifestId} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="p-2.5 whitespace-nowrap font-sans text-slate-500">
+                          {new Date(group.timestamp).toLocaleString('id-ID')}
+                        </td>
+                        <td className="p-2.5 font-mono font-bold text-blue-700">{group.sku}</td>
+                        <td className="p-2.5 font-mono text-slate-600">
+                          <div className="flex flex-wrap gap-1">
+                            {Array.isArray(group.items) && group.items.map((item, idx) => {
+                              if (!item) return null;
+                              return (
+                                <span key={idx} className="bg-slate-100 text-slate-700 text-[10px] px-1.5 py-0.5 rounded border border-slate-200 font-bold">
+                                  {item.locatorId} ({Math.abs(item.qty || 0)})
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </td>
+                        <td className="p-2.5 text-center font-bold text-blue-700">{group.totalQty} PCS</td>
+                        <td className="p-2.5 text-slate-600 uppercase text-[11px]">{group.operator}</td>
+                        <td className="p-2.5 text-center">
+                          <button
+                            onClick={() => handleReviewPendingGroup(group)}
+                            className="inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-[#0055C4] px-2.5 py-1 rounded text-[11px] font-semibold border border-blue-200 transition-colors mr-2"
+                          >
+                            Review Form
+                          </button>
+                          <button
+                            onClick={() => handlePreviewHistorical(group)}
+                            className="inline-flex items-center gap-1 bg-slate-800 text-white hover:bg-slate-900 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors"
+                          >
+                            <Eye className="w-3 h-3" />
+                            Struk
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -779,46 +809,48 @@ export function Outbound() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
-                {aggregatedHistoryTransactions.length === 0 ? (
+                {(!aggregatedHistoryTransactions || aggregatedHistoryTransactions.length === 0) ? (
                   <tr>
                     <td colSpan={9} className="text-center py-6 text-slate-400 italic text-[11px]">Belum ada riwayat rekaman mutasi transaksi keluar.</td>
                   </tr>
                 ) : (
-                  aggregatedHistoryTransactions.map((group) => (
-                    /* PERBAIKAN: Menggunakan group.id yang dijamin unik daripada group.manifestId */
-                    <tr key={group.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="p-2.5 whitespace-nowrap text-slate-500 text-[11px]">
-                        {new Date(group.timestamp).toLocaleString('id-ID')}
-                      </td>
-                      <td className="p-2.5 font-mono text-slate-400 text-[10px] font-bold">{group.manifestId}</td>
-                      <td className="p-2.5 font-mono font-bold text-slate-900">{group.sku}</td>
-                      <td className="p-2.5 font-mono font-bold text-[#0055C4]">
-                        {group.locatorsList.sort().join(', ')}
-                      </td>
-                      <td className="p-2.5 text-center font-bold text-red-600">{group.totalQty} PCS</td>
-                      <td className="p-2.5 text-slate-600 uppercase text-[10px]">{group.operator}</td>
-                      <td className="p-2.5 text-slate-500 truncate max-w-[120px]">{group.memo}</td>
-                      <td className="p-2.5 text-center">
-                        <span className={`px-2 py-0.5 rounded-full font-bold text-[9px] ${
-                          group.status === 'CONFIRMED' 
-                            ? 'bg-emerald-100 text-emerald-800' 
-                            : group.status === 'BOOKED'
-                              ? 'bg-blue-100 text-blue-800'
-                              : 'bg-red-100 text-red-800'
-                        }`}>
-                          {group.status}
-                        </span>
-                      </td>
-                      <td className="p-2.5 text-center">
-                        <button
-                          onClick={() => handlePreviewHistorical(group)}
-                          className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] px-2 py-1 rounded font-bold transition-colors"
-                        >
-                          Lihat Struk
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  aggregatedHistoryTransactions.map((group) => {
+                    if (!group) return null;
+                    return (
+                      <tr key={group.id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="p-2.5 whitespace-nowrap text-slate-500 text-[11px]">
+                          {new Date(group.timestamp).toLocaleString('id-ID')}
+                        </td>
+                        <td className="p-2.5 font-mono text-slate-400 text-[10px] font-bold">{group.manifestId}</td>
+                        <td className="p-2.5 font-mono font-bold text-slate-900">{group.sku}</td>
+                        <td className="p-2.5 font-mono font-bold text-[#0055C4]">
+                          {Array.isArray(group.locatorsList) ? group.locatorsList.sort().join(', ') : '-'}
+                        </td>
+                        <td className="p-2.5 text-center font-bold text-red-600">{group.totalQty} PCS</td>
+                        <td className="p-2.5 text-slate-600 uppercase text-[10px]">{group.operator}</td>
+                        <td className="p-2.5 text-slate-500 truncate max-w-[120px]">{group.memo}</td>
+                        <td className="p-2.5 text-center">
+                          <span className={`px-2 py-0.5 rounded-full font-bold text-[9px] ${
+                            group.status === 'CONFIRMED' 
+                              ? 'bg-emerald-100 text-emerald-800' 
+                              : group.status === 'BOOKED'
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-red-100 text-red-800'
+                          }`}>
+                            {group.status}
+                          </span>
+                        </td>
+                        <td className="p-2.5 text-center">
+                          <button
+                            onClick={() => handlePreviewHistorical(group)}
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] px-2 py-1 rounded font-bold transition-colors"
+                          >
+                            Lihat Struk
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -853,21 +885,24 @@ export function Outbound() {
               </tr>
             </thead>
             <tbody className="divide-y divide-dashed divide-gray-400">
-              {receiptPreview.rows.map((item, idx) => (
-                <tr key={idx} className="align-top">
-                  <td className="py-1.5 font-bold break-all pr-1">{item.sku}</td>
-                  <td className="py-1.5 truncate max-w-[80px] pr-1 normal-case">{item.name}</td>
-                  <td className="py-1.5 text-center font-bold">{item.qty}</td>
-                  <td className="py-1.5 text-right font-bold break-all">{item.locatorId}</td>
-                </tr>
-              ))}
+              {Array.isArray(receiptPreview.rows) && receiptPreview.rows.map((item, idx) => {
+                if (!item) return null;
+                return (
+                  <tr key={idx} className="align-top">
+                    <td className="py-1.5 font-bold break-all pr-1">{item.sku}</td>
+                    <td className="py-1.5 truncate max-w-[80px] pr-1 normal-case">{item.name}</td>
+                    <td className="py-1.5 text-center font-bold">{item.qty}</td>
+                    <td className="py-1.5 text-right font-bold break-all">{item.locatorId}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           <div className="border-b border-dashed border-black my-3"></div>
           <div className="grid grid-cols-2 text-center text-[10px] mt-4 pt-1 gap-4 page-break-inside-avoid">
             <div className="flex flex-col justify-between h-14">
               <p className="font-bold">PETUGAS GUDANG</p>
-              <div className="border-t border-black w-full pt-1 truncate">{receiptPreview.operator}</div>
+              <div className="border-t border-black w-full pt-1">PETUGAS GUDANG</div>
             </div>
             <div className="flex flex-col justify-between h-14">
               <p className="font-bold">ADMIN GUDANG</p>

@@ -13,9 +13,15 @@ export function Inventory() {
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('');
 
-  // Ambil data user aktif dan validasi status Super Admin
+  // Ambil data user aktif dan validasi hak akses khusus (Super Admin & Kepala Gudang JKT)
   const currentUser = getCurrentUser();
-  const isSuperAdmin = currentUser?.role?.toUpperCase() === 'SUPER_ADMIN' || currentUser?.role?.toLowerCase() === 'super admin';
+  const userRoleClean = currentUser?.role?.trim().toUpperCase() || '';
+  
+  const isSuperAdmin = userRoleClean === 'SUPER_ADMIN' || currentUser?.role?.toLowerCase() === 'super admin';
+  const isKepalaGudangJkt = userRoleClean === 'KEPALA_GUDANG_JKT' || userRoleClean === 'KEPALA GUDANG JKT';
+  
+  // Menggabungkan izin untuk melihat & mengeksekusi menu AKSI
+  const hasActionAccess = isSuperAdmin || isKepalaGudangJkt;
 
   const fetchProducts = () => {
     Promise.all([
@@ -39,9 +45,9 @@ export function Inventory() {
 
     try {
       if (editingProduct) {
-        // Proteksi tingkat fungsi untuk edit
-        if (!isSuperAdmin) {
-          setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin yang boleh mengubah data SKU.' });
+        // Proteksi tingkat fungsi untuk edit data SKU
+        if (!hasActionAccess) {
+          setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin atau Kepala Gudang JKT yang boleh mengubah data SKU.' });
           return;
         }
         await updateProduct(editingProduct.sku, formData);
@@ -59,9 +65,9 @@ export function Inventory() {
   };
 
   const handleDelete = async (sku: string) => {
-    // Proteksi tingkat fungsi untuk hapus
-    if (!isSuperAdmin) {
-      setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin yang berhak menghapus data SKU.' });
+    // Proteksi tingkat fungsi untuk hapus data SKU
+    if (!hasActionAccess) {
+      setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin atau Kepala Gudang JKT yang berhak menghapus data SKU.' });
       return;
     }
 
@@ -82,7 +88,7 @@ export function Inventory() {
   };
 
   const handleEditClick = (product: Product) => {
-    if (!isSuperAdmin) return;
+    if (!hasActionAccess) return;
     setEditingProduct(product);
     setFormData(product);
     setShowForm(true);
@@ -105,7 +111,7 @@ export function Inventory() {
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Proteksi tingkat fungsi untuk import data batch
+    // Proteksi tingkat fungsi untuk import data batch (Khusus Super Admin)
     if (!isSuperAdmin) {
       setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin yang berhak mengimpor file CSV.' });
       e.target.value = '';
@@ -183,7 +189,7 @@ export function Inventory() {
               Katalog SKU & Kontrol Safety Stock Pabrik
             </h2>
             <p className="text-slate-500 mt-1.5 text-[13px]">
-              Daftar SKU Aktif, berat per unit, dan status safety stock minimum. Klik untuk membuka/menutup panel registrasi baru.
+              Daftar SKU Aktif, dimensi unit, dan pengaturan manajemen stok gudang. Klik untuk membuka/menutup panel registrasi baru.
             </p>
           </div>
           <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showForm ? 'rotate-180' : ''}`} />
@@ -243,7 +249,7 @@ export function Inventory() {
       {showForm && (
         <div className="bg-white border-2 border-blue-200 rounded-xl p-6 shadow-md mb-6 animate-fadeIn">
           <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-4">
-            <h3 className="text-lg font-bold text-slate-800">{editingProduct ? 'Edit Product (Super Admin Only)' : 'Add New Product'}</h3>
+            <h3 className="text-lg font-bold text-slate-800">{editingProduct ? 'Edit Product' : 'Add New Product'}</h3>
             <button onClick={() => { setShowForm(false); setEditingProduct(null); }} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
           </div>
           
@@ -350,17 +356,16 @@ export function Inventory() {
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KATEGORI LAYOUT SLOT</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">POSISI RAK (SLOT)</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">DIMENSI (VOL/BERAT)</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">AMBANG SAFETY STOCK</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">JUMLAH ON HAND</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">STATUS KEAMANAN</th>
+              {hasActionAccess && (
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">AKSI</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {products.filter(p => categoryFilter === '' || p.category === categoryFilter).map(p => {
-              const safetyStock = (p.sku.charCodeAt(0) * 10 + p.sku.charCodeAt(p.sku.length - 1)) % 250 + 20;
               const invData = inventoryDetails[p.sku] || { totalPhysicalQty: 0, locators: {} };
               const onHandQty = invData.totalPhysicalQty;
-              const isSafe = onHandQty >= safetyStock;
               const weightEstimate = (p.volumeM3 * 100).toFixed(1);
               
               const activeLocators = Object.entries(invData.locators)
@@ -368,11 +373,11 @@ export function Inventory() {
                  .map(([locId, data]: [string, any]) => `${locId} (${data.physicalQty})`);
 
               return (
-                <tr key={p.sku} className="hover:bg-slate-50 transition-colors group relative">
-                  {/* Klik SKU hanya berfungsi sebagai tombol edit jika user merupakan Super Admin */}
+                <tr key={p.sku} className="hover:bg-slate-50 transition-colors group">
+                  {/* Klik SKU hanya berfungsi sebagai tombol edit jika user memiliki otorisasi */}
                   <td 
-                    className={`px-6 py-4 text-sm font-bold text-blue-700 font-mono tracking-tight ${isSuperAdmin ? 'cursor-pointer hover:underline' : 'cursor-default'}`} 
-                    onClick={() => isSuperAdmin && handleEditClick(p)}
+                    className={`px-6 py-4 text-sm font-bold text-blue-700 font-mono tracking-tight ${hasActionAccess ? 'cursor-pointer hover:underline' : 'cursor-default'}`} 
+                    onClick={() => hasActionAccess && handleEditClick(p)}
                   >
                     {p.sku}
                   </td>
@@ -395,44 +400,37 @@ export function Inventory() {
                     <div className="text-sm font-bold text-slate-700 font-mono">{p.volumeM3} m³</div>
                     <div className="text-xs text-slate-400 mt-0.5">{weightEstimate} Kg</div>
                   </td>
-                  <td className="px-6 py-4 text-sm font-medium text-slate-500 font-mono">{safetyStock} {p.uom}</td>
-                  <td className={`px-6 py-4 text-sm font-bold font-mono ${isSafe ? 'text-emerald-600' : 'text-red-600'}`}>
+                  <td className="px-6 py-4 text-sm font-bold font-mono text-slate-700">
                     {onHandQty} {p.uom}
                   </td>
-                  <td className="px-6 py-4 relative">
-                    <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
-                      isSafe ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-red-50 text-red-600 border-red-200'
-                    }`}>
-                      {isSafe ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
-                      {isSafe ? 'Stok Aman' : 'Reorder Point'}
-                    </span>
-                    
-                    {/* MENU AKSI OVERLAY (Hanya di-render dan muncul jika user adalah Super Admin) */}
-                    {isSuperAdmin && (
-                      <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-50 pl-4 py-1.5 rounded-l-md z-10">
+                  
+                  {/* KOLOM AKSI: Hanya di-render & muncul jika role adalah SUPER_ADMIN atau KEPALA_GUDANG_JKT */}
+                  {hasActionAccess && (
+                    <td className="px-6 py-4 text-center">
+                      <div className="flex items-center justify-center gap-2">
                         <button 
                           onClick={() => handleEditClick(p)}
-                          className="p-1.5 text-blue-600 hover:bg-blue-100 rounded-md transition-colors shadow-sm bg-white border border-blue-200"
+                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors shadow-sm bg-white border border-blue-200"
                           title="Edit Product"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
                         <button 
                           onClick={() => handleDelete(p.sku)}
-                          className="p-1.5 text-red-600 hover:bg-red-100 rounded-md transition-colors shadow-sm bg-white border border-red-200"
+                          className="p-1.5 text-red-600 hover:bg-red-50 rounded-md transition-colors shadow-sm bg-white border border-red-200"
                           title="Delete Product"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                    )}
-                  </td>
+                    </td>
+                  )}
                 </tr>
               );
             })}
             {products.length === 0 && (
               <tr>
-                <td colSpan={8} className="p-12 text-center text-slate-500 font-medium">
+                <td colSpan={hasActionAccess ? 7 : 6} className="p-12 text-center text-slate-500 font-medium">
                   No products found. Add one or import CSV.
                 </td>
               </tr>
