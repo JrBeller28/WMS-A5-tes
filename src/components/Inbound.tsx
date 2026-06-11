@@ -17,7 +17,7 @@ interface ReceiptPreviewData {
   date: string;
 }
 
-export function Inbound() {
+export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedSku, setSelectedSku] = useState('');
   const [totalQty, setTotalQty] = useState('');
@@ -28,6 +28,10 @@ export function Inbound() {
   const [locators, setLocators] = useState<Locator[]>([]);
   const [inventory, setInventory] = useState<any>({});
   const [tempAllocations, setTempAllocations] = useState<TempAllocation[]>([]);
+  
+  // Pagination State
+  const [historyPageSize, setHistoryPageSize] = useState<number>(30);
+  const [historyCurrentPage, setHistoryCurrentPage] = useState<number>(1);
   
   // State mengontrol penampilan Live Receipt Preview Lembar Kasir
   const [receiptPreview, setReceiptPreview] = useState<ReceiptPreviewData | null>(null);
@@ -368,7 +372,24 @@ export function Inbound() {
     }));
   };
 
-  const consolidatedHistoryList = getConsolidatedTransactions(transactions);
+  const allConsolidated = getConsolidatedTransactions(transactions);
+  
+  let filteredConsolidated = allConsolidated.filter(tx => tx && tx.type === 'INBOUND');
+  
+  // Filter pencarian
+  if (globalSearch) {
+    const searchLower = globalSearch.toLowerCase();
+    filteredConsolidated = filteredConsolidated.filter(tx => 
+      tx.sku.toLowerCase().includes(searchLower) ||
+      tx.locatorId.toLowerCase().includes(searchLower) ||
+      (tx.operator && tx.operator.toLowerCase().includes(searchLower))
+    );
+  }
+
+  const consolidatedHistoryList = filteredConsolidated.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+  const totalHistoryPages = Math.ceil(consolidatedHistoryList.length / historyPageSize) || 1;
+  const currentHistoryData = consolidatedHistoryList.slice((historyCurrentPage - 1) * historyPageSize, historyCurrentPage * historyPageSize);
 
   const recommendedLoc = recommendations[0];
   let rack = 'FL-A';
@@ -696,12 +717,27 @@ export function Inbound() {
 
         {/* RIWAYAT TRANSAKSI INBOUND (KONSOLIDASI 1 BARIS PER BATCH) */}
         <section className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
-          <div className="mb-4">
-            <h3 className="text-sm font-bold text-[#0F294D] uppercase tracking-wider flex items-center gap-1.5">
-              <span className="w-1 h-4 bg-slate-700 block rounded"></span>
-              Riwayat Transaksi Inbound Gudang
-            </h3>
-            <p className="text-[11px] text-slate-500">Daftar manifest log masuk dikonsolidasikan berdasarkan batch transaksi.</p>
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-4">
+            <div>
+              <h3 className="text-sm font-bold text-[#0F294D] uppercase tracking-wider flex items-center gap-1.5">
+                <span className="w-1 h-4 bg-slate-700 block rounded"></span>
+                Riwayat Transaksi Inbound Gudang
+              </h3>
+              <p className="text-[11px] text-slate-500">Daftar manifest log masuk dikonsolidasikan berdasarkan batch transaksi.</p>
+            </div>
+            
+            <select 
+               className="text-xs border-slate-300 rounded p-1"
+               value={historyPageSize} 
+               onChange={(e) => {
+                 setHistoryPageSize(Number(e.target.value));
+                 setHistoryCurrentPage(1);
+               }}
+            >
+               <option value={30}>30/halaman</option>
+               <option value={50}>50/halaman</option>
+               <option value={100}>100/halaman</option>
+            </select>
           </div>
           
           <div className="overflow-x-auto rounded border border-slate-200">
@@ -717,37 +753,63 @@ export function Inbound() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
-                {consolidatedHistoryList.length === 0 ? (
+                {currentHistoryData.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="p-4 text-center text-slate-400 italic">Belum ada data transaksi masuk.</td>
                   </tr>
                 ) : (
-                  consolidatedHistoryList.map((tx) => (
-                    <tr key={tx.id} className="hover:bg-slate-50/60 transition-colors">
-                      <td className="p-2.5 whitespace-nowrap font-sans text-slate-500">
-                        {new Date(tx.timestamp).toLocaleString('id-ID')}
-                      </td>
-                      <td className="p-2.5 font-mono font-bold text-blue-700">{tx.sku}</td>
-                      <td className="p-2.5 text-center font-bold text-slate-800">{tx.qty} PCS</td>
-                      <td className="p-2.5 font-bold text-emerald-700 max-w-xs truncate" title={tx.locatorId}>
-                        {tx.locatorId}
-                      </td>
-                      <td className="p-2.5 text-slate-600 uppercase text-[11px]">{tx.operator || 'SYSTEM'}</td>
-                      <td className="p-2.5 text-center">
-                        <button
-                          onClick={() => handlePreviewHistorical(tx)}
-                          className="inline-flex items-center gap-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 px-2.5 py-1 rounded text-[11px] font-semibold border border-slate-200 transition-colors"
-                        >
-                          <Eye className="w-3 h-3" />
-                          Preview Struk
-                        </button>
-                      </td>
+                  <>
+                    {currentHistoryData.map((tx) => (
+                      <tr key={tx.id} className="hover:bg-slate-50/60 transition-colors">
+                        <td className="p-2.5 whitespace-nowrap font-sans text-slate-500">
+                          {new Date(tx.timestamp).toLocaleString('id-ID')}
+                        </td>
+                        <td className="p-2.5 font-mono font-bold text-blue-700">{tx.sku}</td>
+                        <td className="p-2.5 text-center font-bold text-slate-800">{tx.qty} PCS</td>
+                        <td className="p-2.5 font-bold text-emerald-700 max-w-xs truncate" title={tx.locatorId}>
+                          {tx.locatorId}
+                        </td>
+                        <td className="p-2.5 text-slate-600 uppercase text-[11px]">{tx.operator || 'SYSTEM'}</td>
+                        <td className="p-2.5 text-center">
+                          <button
+                            onClick={() => handlePreviewHistorical(tx)}
+                            className="inline-flex items-center gap-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 px-2.5 py-1 rounded text-[11px] font-semibold border border-slate-200 transition-colors"
+                          >
+                            <Eye className="w-3 h-3" />
+                            Preview Struk
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="bg-slate-100 font-bold border-t-2 border-slate-300 text-slate-800">
+                      <td colSpan={2} className="p-2.5 text-right uppercase tracking-wider">Grand Total Inbound:</td>
+                      <td className="p-2.5 text-center text-blue-700 text-sm">{consolidatedHistoryList.reduce((sum, tx) => sum + tx.qty, 0)} PCS</td>
+                      <td colSpan={3} className="p-2.5"></td>
                     </tr>
-                  ))
+                  </>
                 )}
               </tbody>
             </table>
           </div>
+          {totalHistoryPages > 1 && (
+            <div className="flex justify-end items-center mt-4 gap-2 text-xs">
+              <button 
+                disabled={historyCurrentPage === 1}
+                onClick={() => setHistoryCurrentPage(p => Math.max(1, p - 1))}
+                className="px-2 py-1 border border-slate-300 rounded disabled:opacity-50"
+              >
+                Prev
+              </button>
+              <span>Halaman {historyCurrentPage} dari {totalHistoryPages}</span>
+              <button 
+                disabled={historyCurrentPage === totalHistoryPages}
+                onClick={() => setHistoryCurrentPage(p => Math.min(totalHistoryPages, p + 1))}
+                className="px-2 py-1 border border-slate-300 rounded disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </section>
       </div>
 

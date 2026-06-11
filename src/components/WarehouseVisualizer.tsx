@@ -285,59 +285,56 @@ export function WarehouseVisualizer() {
                         const borderColor = getBorderUtilColor(stat.percentage);
 
                         return (
-                          <div key={locId} className="w-48 flex flex-col items-center">
+                          <div key={locId} className="w-[190px] flex flex-col items-center">
                             {/* Slot Card */}
                             <div 
                               onMouseEnter={(e) => handleSlotMouseEnter(e, locId, stat, ZONE_COLORS[rackZone]?.label || 'General', selectedRack)}
                               onMouseMove={handleSlotMouseMove}
                               onMouseLeave={handleSlotMouseLeave}
-                              className={`w-full bg-white border-2 ${borderColor} rounded-lg p-3 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] relative overflow-hidden transition-all hover:shadow-md cursor-crosshair`}
+                              className={`w-full bg-white border-2 ${borderColor} rounded-[10px] p-3 shadow-sm relative overflow-hidden transition-all hover:shadow-md cursor-crosshair h-[140px] flex flex-col justify-between`}
                             >
                               
                               {/* Slot ID & % */}
-                              <div className="flex justify-between items-start mb-2">
+                              <div className="flex justify-between items-start">
                                 <span className="font-bold text-slate-800 text-sm">{col.replace('FL-', '')}.{level}</span>
-                                <span className={`text-[10px] font-mono font-bold ${stat.percentage >= 95 ? 'text-rose-600' : 'text-slate-400'}`}>
+                                <span className={`text-[11px] font-bold ${stat.percentage >= 95 ? 'text-rose-600' : 'text-slate-400'}`}>
                                   {stat.percentage}%
                                 </span>
                               </div>
 
                               {/* Content */}
-                              <div className="h-12 flex flex-col justify-center">
+                              <div className="flex-1 flex flex-col justify-center my-1 text-left w-full">
                                 {isVacant ? (
-                                  <span className="text-xs italic font-semibold text-slate-300 text-center tracking-widest">VACANT</span>
+                                  <div className="flex items-center justify-center h-full">
+                                    <span className="text-sm italic font-bold text-slate-200 tracking-widest uppercase">Vacant</span>
+                                  </div>
                                 ) : (
                                   <>
-                                    <div className="text-[11px] font-bold text-slate-800 truncate" title={stat.items[0]?.name}>
+                                    <div className="text-xs font-bold text-slate-800 truncate w-full" title={stat.items[0]?.name}>
                                       {stat.items[0]?.sku}
                                     </div>
-                                    <div className="text-[10px] font-medium text-slate-500">
+                                    <div className="text-xs font-medium text-slate-500 mt-0.5 mt-1">
                                       {stat.items.map(i => i.qty).reduce((a,b)=>a+b,0)} PCS
-                                      {stat.items.length > 1 && <span className="text-indigo-500 ml-1">+{stat.items.length - 1} Mix</span>}
+                                      {stat.items.length > 1 && <span className="text-indigo-500 ml-1 font-bold">+{stat.items.length - 1} Mix</span>}
                                     </div>
                                   </>
                                 )}
                               </div>
 
                               {/* Progress bar */}
-                              <div className="mt-3">
-                                <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
+                              <div className="mt-auto">
+                                <div className="h-[3px] w-full bg-slate-100 rounded-full overflow-hidden">
                                   <div className={`h-full transition-all duration-500 ${getUtilColor(stat.percentage)}`} style={{ width: `${stat.percentage}%` }}></div>
                                 </div>
-                                <div className="flex justify-between items-center mt-1">
-                                  <span className="text-[9px] font-mono font-medium text-slate-500">{stat.usedVol.toFixed(2)} m³</span>
-                                  <span className="text-[9px] font-mono text-slate-400">{stat.maxVol.toFixed(1)} m³ Max</span>
+                                <div className="flex justify-between items-center mt-2">
+                                  <span className="text-[10px] font-bold text-slate-400">{stat.usedVol.toFixed(2)} m³</span>
+                                  <span className="text-[10px] font-bold text-slate-300">{stat.maxVol.toFixed(1)} m³ Max</span>
                                 </div>
                               </div>
-
                             </div>
 
                             {/* Beam representation directly under card */}
-                            <div className="w-[90%] h-2 bg-slate-800 rounded-sm mt-3 relative">
-                              {/* Small triangle to indicate connection */}
-                              <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-t-transparent border-r-4 border-r-slate-800 border-b-4 border-b-transparent"></div>
-                              <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-t-transparent border-l-4 border-l-slate-800 border-b-4 border-b-transparent"></div>
-                            </div>
+                            <div className="w-[92%] h-2.5 bg-slate-800 rounded-full mt-2.5 relative shadow-sm"></div>
                           </div>
                         );
                       })}

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Building2, 
   LayoutDashboard, 
@@ -9,7 +9,9 @@ import {
   Settings, 
   Bell, 
   Search,
-  Power
+  Power,
+  Scale,
+  ShieldAlert
 } from 'lucide-react';
 import { getCurrentUser, logoutUser } from '../lib/auth';
 
@@ -18,10 +20,32 @@ interface LayoutProps {
   currentTab: string;
   onTabChange: (tab: string) => void;
   onLogout?: () => void;
+  // Menambahkan properti Opsional untuk Search agar terhubung secara global
+  searchQuery?: string;
+  onSearchChange?: (query: string) => void;
 }
 
-export function Layout({ children, currentTab, onTabChange, onLogout }: LayoutProps) {
+export function Layout({ 
+  children, 
+  currentTab, 
+  onTabChange, 
+  onLogout,
+  searchQuery,
+  onSearchChange 
+}: LayoutProps) {
   const user = getCurrentUser();
+  
+  // Fallback state lokal jika App.tsx belum melemparkan state search global (menghindari error)
+  const [localSearch, setLocalSearch] = useState('');
+  const activeSearchValue = searchQuery !== undefined ? searchQuery : localSearch;
+
+  const handleSearchChange = (value: string) => {
+    if (onSearchChange) {
+      onSearchChange(value);
+    } else {
+      setLocalSearch(value);
+    }
+  };
 
   const handleLogout = () => {
     logoutUser();
@@ -34,6 +58,7 @@ export function Layout({ children, currentTab, onTabChange, onLogout }: LayoutPr
     { id: 'inbound', label: 'Inbound', icon: LogIn },
     { id: 'outbound', label: 'Outbound', icon: LogOut },
     { id: 'ledger', label: 'Stock Ledger', icon: History },
+    { id: 'balance', label: 'Stock Balance', icon: Scale },
   ];
 
   return (
@@ -97,6 +122,8 @@ export function Layout({ children, currentTab, onTabChange, onLogout }: LayoutPr
               <input 
                 type="text" 
                 placeholder="Search SKU, Batch, or Bin..." 
+                value={activeSearchValue} // Value dikontrol oleh state
+                onChange={(e) => handleSearchChange(e.target.value)} // Memicu perubahan input
                 className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
               />
             </div>

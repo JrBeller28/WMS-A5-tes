@@ -22,7 +22,7 @@ interface ReceiptPreviewData {
   memo: string;
 }
 
-export function Outbound() {
+export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [locators, setLocators] = useState<LocatorType[]>([]);
   
@@ -41,6 +41,10 @@ export function Outbound() {
   const [bookedTransactions, setBookedTransactions] = useState<any[]>([]);
   const [allOutboundTransactions, setAllOutboundTransactions] = useState<any[]>([]);
   const [receiptPreview, setReceiptPreview] = useState<ReceiptPreviewData | null>(null);
+
+  // Pagination State
+  const [historyPageSize, setHistoryPageSize] = useState<number>(30);
+  const [historyCurrentPage, setHistoryCurrentPage] = useState<number>(1);
 
   const refreshTransactionsData = () => {
     getTransactions().then(txs => {
@@ -371,8 +375,25 @@ export function Outbound() {
       groups[key].rawItems.push(tx);
     });
 
-    return Object.values(groups);
-  }, [allOutboundTransactions]);
+    let result = Object.values(groups);
+    
+    // Filter pencarian
+    if (globalSearch) {
+      const searchLower = globalSearch.toLowerCase();
+      result = result.filter(g => 
+        g.manifestId.toLowerCase().includes(searchLower) ||
+        g.sku.toLowerCase().includes(searchLower) ||
+        g.status.toLowerCase().includes(searchLower) ||
+        g.operator.toLowerCase().includes(searchLower) ||
+        (Array.isArray(g.locatorsList) && g.locatorsList.some(l => l.toLowerCase().includes(searchLower)))
+      );
+    }
+    
+    return result.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [allOutboundTransactions, globalSearch]);
+
+  const totalHistoryPages = Math.ceil((aggregatedHistoryTransactions.length || 0) / historyPageSize) || 1;
+  const currentHistoryData = aggregatedHistoryTransactions.slice((historyCurrentPage - 1) * historyPageSize, historyCurrentPage * historyPageSize);
 
   const handlePreviewHistorical = (group: any) => {
     if (!group) return;
@@ -785,12 +806,26 @@ export function Outbound() {
               </h3>
               <p className="text-[11px] text-slate-500">Log mutasi item terperinci terkelompok per Manifes ID seperti di modul Inbound.</p>
             </div>
-            <button 
-              onClick={refreshTransactionsData}
-              className="p-1 text-slate-400 hover:text-[#0055C4] transition-colors"
-            >
-              <RefreshCw className="w-4 h-4" />
-            </button>
+            <div className="flex gap-2 items-center">
+               <select 
+                 className="text-xs border-slate-300 rounded p-1"
+                 value={historyPageSize} 
+                 onChange={(e) => {
+                   setHistoryPageSize(Number(e.target.value));
+                   setHistoryCurrentPage(1);
+                 }}
+               >
+                 <option value={30}>30/halaman</option>
+                 <option value={50}>50/halaman</option>
+                 <option value={100}>100/halaman</option>
+               </select>
+               <button 
+                onClick={refreshTransactionsData}
+                className="p-1 text-slate-400 hover:text-[#0055C4] transition-colors"
+               >
+                 <RefreshCw className="w-4 h-4" />
+               </button>
+            </div>
           </div>
 
           <div className="overflow-x-auto rounded border border-slate-200">
@@ -809,52 +844,78 @@ export function Outbound() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
-                {(!aggregatedHistoryTransactions || aggregatedHistoryTransactions.length === 0) ? (
+                {(!currentHistoryData || currentHistoryData.length === 0) ? (
                   <tr>
                     <td colSpan={9} className="text-center py-6 text-slate-400 italic text-[11px]">Belum ada riwayat rekaman mutasi transaksi keluar.</td>
                   </tr>
                 ) : (
-                  aggregatedHistoryTransactions.map((group) => {
-                    if (!group) return null;
-                    return (
-                      <tr key={group.id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="p-2.5 whitespace-nowrap text-slate-500 text-[11px]">
-                          {new Date(group.timestamp).toLocaleString('id-ID')}
-                        </td>
-                        <td className="p-2.5 font-mono text-slate-400 text-[10px] font-bold">{group.manifestId}</td>
-                        <td className="p-2.5 font-mono font-bold text-slate-900">{group.sku}</td>
-                        <td className="p-2.5 font-mono font-bold text-[#0055C4]">
-                          {Array.isArray(group.locatorsList) ? group.locatorsList.sort().join(', ') : '-'}
-                        </td>
-                        <td className="p-2.5 text-center font-bold text-red-600">{group.totalQty} PCS</td>
-                        <td className="p-2.5 text-slate-600 uppercase text-[10px]">{group.operator}</td>
-                        <td className="p-2.5 text-slate-500 truncate max-w-[120px]">{group.memo}</td>
-                        <td className="p-2.5 text-center">
-                          <span className={`px-2 py-0.5 rounded-full font-bold text-[9px] ${
-                            group.status === 'CONFIRMED' 
-                              ? 'bg-emerald-100 text-emerald-800' 
-                              : group.status === 'BOOKED'
-                                ? 'bg-blue-100 text-blue-800'
-                                : 'bg-red-100 text-red-800'
-                          }`}>
-                            {group.status}
-                          </span>
-                        </td>
-                        <td className="p-2.5 text-center">
-                          <button
-                            onClick={() => handlePreviewHistorical(group)}
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] px-2 py-1 rounded font-bold transition-colors"
-                          >
-                            Lihat Struk
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
+                  <>
+                    {currentHistoryData.map((group) => {
+                      if (!group) return null;
+                      return (
+                        <tr key={group.id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="p-2.5 whitespace-nowrap text-slate-500 text-[11px]">
+                            {new Date(group.timestamp).toLocaleString('id-ID')}
+                          </td>
+                          <td className="p-2.5 font-mono text-slate-400 text-[10px] font-bold">{group.manifestId}</td>
+                          <td className="p-2.5 font-mono font-bold text-slate-900">{group.sku}</td>
+                          <td className="p-2.5 font-mono font-bold text-[#0055C4]">
+                            {Array.isArray(group.locatorsList) ? group.locatorsList.sort().join(', ') : '-'}
+                          </td>
+                          <td className="p-2.5 text-center font-bold text-red-600">{group.totalQty} PCS</td>
+                          <td className="p-2.5 text-slate-600 uppercase text-[10px]">{group.operator}</td>
+                          <td className="p-2.5 text-slate-500 truncate max-w-[120px]">{group.memo}</td>
+                          <td className="p-2.5 text-center">
+                            <span className={`px-2 py-0.5 rounded-full font-bold text-[9px] ${
+                              group.status === 'CONFIRMED' 
+                                ? 'bg-emerald-100 text-emerald-800' 
+                                : group.status === 'BOOKED'
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-red-100 text-red-800'
+                            }`}>
+                              {group.status}
+                            </span>
+                          </td>
+                          <td className="p-2.5 text-center">
+                            <button
+                              onClick={() => handlePreviewHistorical(group)}
+                              className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] px-2 py-1 rounded font-bold transition-colors"
+                            >
+                              Lihat Struk
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    <tr className="bg-slate-100 font-bold border-t-2 border-slate-300 text-slate-800">
+                      <td colSpan={4} className="p-2.5 text-right uppercase tracking-wider">Grand Total Outbound:</td>
+                      <td className="p-2.5 text-center text-red-600 text-sm">{aggregatedHistoryTransactions.reduce((sum, g) => sum + (g?.totalQty || 0), 0)} PCS</td>
+                      <td colSpan={4} className="p-2.5"></td>
+                    </tr>
+                  </>
                 )}
               </tbody>
             </table>
           </div>
+          {totalHistoryPages > 1 && (
+            <div className="flex justify-end items-center mt-4 gap-2 text-xs">
+              <button 
+                disabled={historyCurrentPage === 1}
+                onClick={() => setHistoryCurrentPage(p => Math.max(1, p - 1))}
+                className="px-2 py-1 border border-slate-300 rounded disabled:opacity-50"
+              >
+                Prev
+              </button>
+              <span>Halaman {historyCurrentPage} dari {totalHistoryPages}</span>
+              <button 
+                disabled={historyCurrentPage === totalHistoryPages}
+                onClick={() => setHistoryCurrentPage(p => Math.min(totalHistoryPages, p + 1))}
+                className="px-2 py-1 border border-slate-300 rounded disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </section>
       </div>
 

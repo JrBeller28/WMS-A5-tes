@@ -3,10 +3,14 @@ import { History, ArrowDownLeft, ArrowUpRight, Copy, X } from 'lucide-react';
 import { Transaction } from '../types';
 import { getTransactions } from '../lib/db';
 
-export function StockLedger() {
+export function StockLedger({ globalSearch = '' }: { globalSearch?: string }) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
+
+  // Pagination State
+  const [historyPageSize, setHistoryPageSize] = useState<number>(30);
+  const [historyCurrentPage, setHistoryCurrentPage] = useState<number>(1);
 
   useEffect(() => {
     getTransactions().then(data => {
@@ -22,16 +26,59 @@ export function StockLedger() {
     });
   };
 
+  // Logika penyaringan live menggunakan input dari Search Bar global
+  const filteredTransactions = transactions.filter((tx) => {
+    if (globalSearch === '') return true;
+    
+    const searchLower = globalSearch.toLowerCase();
+    return (
+      tx.sku.toLowerCase().includes(searchLower) ||
+      tx.locatorId.toLowerCase().includes(searchLower) ||
+      tx.operator.toLowerCase().includes(searchLower) ||
+      tx.status.toLowerCase().includes(searchLower)
+    );
+  });
+
+  // 1. HITUNG AGREGAT GRAND TOTAL MUTASI BARANG (Secara Dinamis)
+  const totalInbound = filteredTransactions
+    .filter(tx => tx.type === 'INBOUND')
+    .reduce((sum, tx) => sum + Math.abs(tx.qty), 0);
+
+  const totalOutbound = filteredTransactions
+    .filter(tx => tx.type === 'OUTBOUND')
+    .reduce((sum, tx) => sum + Math.abs(tx.qty), 0);
+
+  // Selisih bersih / Net pergerakan stok gudang (Inbound dikurangi Outbound)
+  const netChange = totalInbound - totalOutbound;
+
+  const sortedTransactions = [...filteredTransactions].sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const totalHistoryPages = Math.ceil(sortedTransactions.length / historyPageSize) || 1;
+  const currentHistoryData = sortedTransactions.slice((historyCurrentPage - 1) * historyPageSize, historyCurrentPage * historyPageSize);
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
-          <History className="w-6 h-6 text-blue-700" />
-          Stock Ledger & Riwayat Transaksi
-        </h2>
-        <p className="text-slate-500 mt-1 text-sm">
-          Daftar seluruh aktivitas inbound dan outbound di dalam gudang.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800 flex items-center gap-2">
+            <History className="w-6 h-6 text-blue-700" />
+            Stock Ledger & Riwayat Transaksi
+          </h2>
+          <p className="text-slate-500 mt-1 text-sm">
+            Daftar seluruh aktivitas inbound dan outbound di dalam gudang.
+          </p>
+        </div>
+        <select 
+          className="text-xs border border-slate-300 rounded p-2"
+          value={historyPageSize} 
+          onChange={(e) => {
+            setHistoryPageSize(Number(e.target.value));
+            setHistoryCurrentPage(1);
+          }}
+        >
+          <option value={30}>30/halaman</option>
+          <option value={50}>50/halaman</option>
+          <option value={100}>100/halaman</option>
+        </select>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
@@ -53,12 +100,16 @@ export function StockLedger() {
                 <tr>
                     <td colSpan={7} className="text-center py-10 text-slate-500">Memuat data...</td>
                 </tr>
-              ) : transactions.length === 0 ? (
+              ) : currentHistoryData.length === 0 ? (
                 <tr>
-                    <td colSpan={7} className="text-center py-10 text-slate-500">Belum ada riwayat transaksi.</td>
+                    <td colSpan={7} className="text-center py-10 text-slate-500">
+                      {transactions.length === 0 
+                        ? 'Belum ada riwayat transaksi.' 
+                        : 'Tidak ada riwayat transaksi yang cocok dengan pencarian.'}
+                    </td>
                 </tr>
               ) : (
-                transactions.map((tx) => (
+                currentHistoryData.map((tx) => (
                   <tr key={tx.id} onClick={() => setSelectedTx(tx)} className="hover:bg-slate-50 transition-colors cursor-pointer">
                     <td className="px-6 py-4 text-sm text-slate-600 whitespace-nowrap">
                       {formatDate(tx.timestamp)}
@@ -101,8 +152,55 @@ export function StockLedger() {
                 ))
               )}
             </tbody>
+
+            {/* 2. BARIS GRAND TOTAL BARU UNTUK BALANCING MUTASI */}
+            {filteredTransactions.length > 0 && (
+              <tfoot className="bg-slate-100 border-t-2 border-slate-300 text-slate-800 font-bold sticky bottom-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+                <tr>
+                  <td colSpan={4} className="px-6 py-4 text-xs font-extrabold text-slate-600 uppercase tracking-wider text-right">
+                    Net Balance ({filteredTransactions.length} Transaksi Terfilter) :
+                  </td>
+                  {/* Total Selisih Bersih (Net Change) */}
+                  <td className={`px-6 py-4 text-sm font-extrabold font-mono text-right whitespace-nowrap ${
+                    netChange === 0 ? 'text-slate-500' : netChange > 0 ? 'text-emerald-600' : 'text-amber-600'
+                  }`}>
+                    {netChange > 0 ? '+' : ''}{netChange.toLocaleString('id-ID')}
+                  </td>
+                  {/* rincian akumulasi Inbound vs Outbound */}
+                  <td colSpan={2} className="px-6 py-3 text-[11px] text-slate-500 font-bold tracking-wide border-l border-slate-200">
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center gap-1 text-emerald-700 bg-emerald-50/60 px-1.5 py-0.5 rounded border border-emerald-100 w-fit">
+                        <ArrowDownLeft className="w-3 h-3" /> Total In: +{totalInbound.toLocaleString('id-ID')}
+                      </div>
+                      <div className="flex items-center gap-1 text-amber-700 bg-amber-50/60 px-1.5 py-0.5 rounded border border-amber-100 w-fit">
+                        <ArrowUpRight className="w-3 h-3" /> Total Out: -{totalOutbound.toLocaleString('id-ID')}
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              </tfoot>
+            )}
           </table>
         </div>
+        {totalHistoryPages > 1 && (
+          <div className="flex justify-end items-center p-4 gap-2 text-xs border-t border-slate-200 bg-slate-50">
+            <button 
+              disabled={historyCurrentPage === 1}
+              onClick={() => setHistoryCurrentPage(p => Math.max(1, p - 1))}
+              className="px-3 py-1.5 border border-slate-300 rounded bg-white hover:bg-slate-50 disabled:opacity-50"
+            >
+              Prev
+            </button>
+            <span className="font-medium text-slate-600">Halaman {historyCurrentPage} dari {totalHistoryPages}</span>
+            <button 
+              disabled={historyCurrentPage === totalHistoryPages}
+              onClick={() => setHistoryCurrentPage(p => Math.min(totalHistoryPages, p + 1))}
+              className="px-3 py-1.5 border border-slate-300 rounded bg-white hover:bg-slate-50 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
+        )}
       </div>
 
       {selectedTx && (

@@ -4,7 +4,7 @@ import { Product, ZoneCategory } from '../types';
 import { getProducts, addProduct, updateProduct, deleteProduct as deleteProductFromDb, addProductsBatch, getTransactions, getInventoryDetails } from '../lib/db';
 import { getCurrentUser } from '../lib/auth'; // Mengambil fungsi auth
 
-export function Inventory() {
+export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [inventoryDetails, setInventoryDetails] = useState<Record<string, any>>({});
   const [showForm, setShowForm] = useState(false);
@@ -37,6 +37,28 @@ export function Inventory() {
     fetchProducts();
   }, []);
 
+  // Logika penyaringan gabungan (Filter Kategori Dropdown + Live Global Search Bar)
+  const filteredProducts = products.filter(p => {
+    const matchesCategory = categoryFilter === '' || p.category === categoryFilter;
+    const matchesSearch = globalSearch === '' || 
+      p.sku.toLowerCase().includes(globalSearch.toLowerCase()) ||
+      p.name.toLowerCase().includes(globalSearch.toLowerCase());
+    
+    return matchesCategory && matchesSearch;
+  });
+
+  // 1. HITUNG AGREGAT GRAND TOTAL UNTUK BALANCING KAPASITAS & STOK (Secara Dinamis)
+  const totalMetrics = filteredProducts.reduce((acc, p) => {
+    const invData = inventoryDetails[p.sku] || { totalPhysicalQty: 0 };
+    const qty = invData.totalPhysicalQty || 0;
+    
+    acc.totalQty += qty;
+    acc.totalVolume += (p.volumeM3 || 0) * qty;
+    acc.totalWeight += ((p.volumeM3 || 0) * 100) * qty; // Estimasi berat total berdasarkan volume terpakai
+    
+    return acc;
+  }, { totalQty: 0, totalVolume: 0, totalWeight: 0 });
+
   const handleSave = async () => {
     if (!formData.sku || !formData.name || !formData.category || formData.volumeM3 === undefined || formData.volumeM3 === '' || !formData.uom) {
       setMessage({ type: 'error', text: 'All fields are required.' });
@@ -45,7 +67,6 @@ export function Inventory() {
 
     try {
       if (editingProduct) {
-        // Proteksi tingkat fungsi untuk edit data SKU
         if (!hasActionAccess) {
           setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin atau Kepala Gudang JKT yang boleh mengubah data SKU.' });
           return;
@@ -65,7 +86,6 @@ export function Inventory() {
   };
 
   const handleDelete = async (sku: string) => {
-    // Proteksi tingkat fungsi untuk hapus data SKU
     if (!hasActionAccess) {
       setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin atau Kepala Gudang JKT yang berhak menghapus data SKU.' });
       return;
@@ -111,7 +131,6 @@ export function Inventory() {
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Proteksi tingkat fungsi untuk import data batch (Khusus Super Admin)
     if (!isSuperAdmin) {
       setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin yang berhak mengimpor file CSV.' });
       e.target.value = '';
@@ -196,7 +215,6 @@ export function Inventory() {
         </div>
       </div>
 
-      {/* MENU ALAT UTALITAS BULK IMPORT & TEMPLATE CSV */}
       <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h4 className="text-sm font-bold text-slate-800">Aksi Massal (Bulk Management)</h4>
@@ -245,7 +263,6 @@ export function Inventory() {
         </div>
       )}
 
-      {/* Slide-out Form Panel */}
       {showForm && (
         <div className="bg-white border-2 border-blue-200 rounded-xl p-6 shadow-md mb-6 animate-fadeIn">
           <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-4">
@@ -363,7 +380,7 @@ export function Inventory() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {products.filter(p => categoryFilter === '' || p.category === categoryFilter).map(p => {
+            {filteredProducts.map(p => {
               const invData = inventoryDetails[p.sku] || { totalPhysicalQty: 0, locators: {} };
               const onHandQty = invData.totalPhysicalQty;
               const weightEstimate = (p.volumeM3 * 100).toFixed(1);
@@ -374,7 +391,6 @@ export function Inventory() {
 
               return (
                 <tr key={p.sku} className="hover:bg-slate-50 transition-colors group">
-                  {/* Klik SKU hanya berfungsi sebagai tombol edit jika user memiliki otorisasi */}
                   <td 
                     className={`px-6 py-4 text-sm font-bold text-blue-700 font-mono tracking-tight ${hasActionAccess ? 'cursor-pointer hover:underline' : 'cursor-default'}`} 
                     onClick={() => hasActionAccess && handleEditClick(p)}
@@ -404,7 +420,6 @@ export function Inventory() {
                     {onHandQty} {p.uom}
                   </td>
                   
-                  {/* KOLOM AKSI: Hanya di-render & muncul jika role adalah SUPER_ADMIN atau KEPALA_GUDANG_JKT */}
                   {hasActionAccess && (
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-2">
@@ -428,14 +443,40 @@ export function Inventory() {
                 </tr>
               );
             })}
-            {products.length === 0 && (
+            {filteredProducts.length === 0 && (
               <tr>
                 <td colSpan={hasActionAccess ? 7 : 6} className="p-12 text-center text-slate-500 font-medium">
-                  No products found. Add one or import CSV.
+                  Tidak ada produk yang cocok dengan pencarian atau filter kategori.
                 </td>
               </tr>
             )}
           </tbody>
+
+          {/* 2. BARIS GRAND TOTAL BARU UNTUK INVENTORY BALANCING KAPASITAS */}
+          {filteredProducts.length > 0 && (
+            <tfoot className="bg-slate-100 border-t-2 border-slate-300 text-slate-800 font-bold sticky bottom-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
+              <tr>
+                <td colSpan={4} className="px-6 py-4 text-xs font-extrabold text-slate-600 uppercase tracking-wider text-right">
+                  Grand Total ({filteredProducts.length} SKU Terfilter) :
+                </td>
+                {/* Akumulasi Total Dimensi Terpakai (Volume & Berat Kumulatif dari Stok On-Hand) */}
+                <td className="px-6 py-4">
+                  <div className="text-sm font-extrabold text-slate-700 font-mono">
+                    {totalMetrics.totalVolume.toFixed(3)} m³
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {totalMetrics.totalWeight.toFixed(1)} Kg
+                  </div>
+                </td>
+                {/* Total Kuantitas Fisik On Hand Kumulatif */}
+                <td className="px-6 py-4 text-sm font-extrabold font-mono text-blue-700 whitespace-nowrap">
+                  {totalMetrics.totalQty.toLocaleString('id-ID')} Items
+                </td>
+                {/* Kolom Aksi Kosong jika akses tersedia */}
+                {hasActionAccess && <td className="px-6 py-4"></td>}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
     </div>
