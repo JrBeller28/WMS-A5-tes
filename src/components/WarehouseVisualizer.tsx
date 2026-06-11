@@ -10,6 +10,15 @@ interface LocatorStat {
   items: { sku: string; name: string; qty: number }[];
 }
 
+// Interface baru untuk mengunci tipe data tooltip hover agar tidak error
+interface HoveredSlotState extends LocatorStat {
+  locId: string;
+  zoneLabel: string;
+  totalWeight: number;
+  x: number;
+  y: number;
+}
+
 const ZONE_COLORS: Record<ZoneCategory | string, { text: string; bg: string; border: string; label: string }> = {
   'FG_PLUMBING': { text: 'text-emerald-500', bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'Plumbing' },
   'FG_SMART_WATER': { text: 'text-blue-400', bg: 'bg-blue-50', border: 'border-blue-200', label: 'Smart Water' },
@@ -43,6 +52,9 @@ export function WarehouseVisualizer() {
   const [inventory, setInventory] = useState<any>({});
   const [selectedRack, setSelectedRack] = useState<string>('FL A-B');
   const [loading, setLoading] = useState(true);
+
+  // State pelacak pergerakan dan penampung data untuk Tooltip Hover
+  const [hoveredSlot, setHoveredSlot] = useState<HoveredSlotState | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -87,6 +99,42 @@ export function WarehouseVisualizer() {
     return s;
   }, [inventory, locators, products]);
 
+  // Fungsi pengontrol aksi kursor masuk, bergeser, dan keluar area slot
+  const handleSlotMouseEnter = (e: React.MouseEvent, locId: string, stat: LocatorStat, zoneLabel: string, rackPrefix: string) => {
+    // Kalkulasi perkiraan berat (safety fallback seberat 2.5 Kg per item jika data produk kosong)
+    const calculatedWeight = stat.items.reduce((acc, current) => {
+      const prod = products.find(p => p.sku === current.sku);
+      const weightPerUnit = prod && (prod as any).weightKg ? (prod as any).weightKg : 2.5; 
+      return acc + (current.qty * weightPerUnit);
+    }, 0);
+
+    // Format ID visual seperti pada gambar screenshot (contoh: R1-A1.1 atau FL-A1.1)
+    const cleanCol = locId.split('.')[0];
+    const cleanLvl = locId.split('.')[1];
+    const formattedLocId = selectedRack.startsWith('FL') 
+      ? `${cleanCol}.${cleanLvl}` 
+      : `${rackPrefix}-${cleanCol}.${cleanLvl}`;
+
+    setHoveredSlot({
+      locId: formattedLocId,
+      zoneLabel,
+      totalWeight: calculatedWeight,
+      ...stat,
+      x: e.clientX,
+      y: e.clientY
+    });
+  };
+
+  const handleSlotMouseMove = (e: React.MouseEvent) => {
+    if (hoveredSlot) {
+      setHoveredSlot(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
+    }
+  };
+
+  const handleSlotMouseLeave = () => {
+    setHoveredSlot(null);
+  };
+
   // Derive rack specific data for the Right Panel
   const selectedConfig = RACK_LAYOUT.find(r => r.id === selectedRack);
   const rackLocators = locators.filter(l => selectedConfig?.racks.includes(l.rack));
@@ -113,7 +161,7 @@ export function WarehouseVisualizer() {
   };
 
   return (
-    <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden font-sans shadow-sm">
+    <div className="bg-slate-50 border border-slate-200 rounded-xl overflow-hidden font-sans shadow-sm relative">
       {/* Header */}
       <div className="bg-white border-b border-slate-200 p-4 flex justify-between items-center bg-slate-50/50">
         <div className="flex items-center gap-3">
@@ -160,9 +208,9 @@ export function WarehouseVisualizer() {
                 return (
                   <button
                     key={rack.id}
-                    onClick={() => !rack.static && setSelectedRack(rack.id)}
-                    disabled={rack.static}
-                    className={`flex flex-col items-start p-3 border rounded-lg transition-all text-left ${isActive ? 'ring-2 ring-indigo-500 shadow-sm ' + colors.border : 'border-slate-200 hover:border-slate-300'} ${rack.static ? 'bg-slate-50 opacity-70 cursor-not-allowed' : 'bg-white cursor-pointer'}`}
+                    onClick={() => !(rack as any).static && setSelectedRack(rack.id)}
+                    disabled={(rack as any).static}
+                    className={`flex flex-col items-start p-3 border rounded-lg transition-all text-left ${isActive ? 'ring-2 ring-indigo-500 shadow-sm ' + colors.border : 'border-slate-200 hover:border-slate-300'} ${(rack as any).static ? 'bg-slate-50 opacity-70 cursor-not-allowed' : 'bg-white cursor-pointer'}`}
                   >
                     <span className={`text-sm font-bold ${colors.text}`}>{rack.id}</span>
                     <span className="text-[10px] text-slate-500 mt-1 leading-tight">{rack.label}</span>
@@ -239,7 +287,12 @@ export function WarehouseVisualizer() {
                         return (
                           <div key={locId} className="w-48 flex flex-col items-center">
                             {/* Slot Card */}
-                            <div className={`w-full bg-white border-2 ${borderColor} rounded-lg p-3 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] relative overflow-hidden transition-all hover:shadow-md`}>
+                            <div 
+                              onMouseEnter={(e) => handleSlotMouseEnter(e, locId, stat, ZONE_COLORS[rackZone]?.label || 'General', selectedRack)}
+                              onMouseMove={handleSlotMouseMove}
+                              onMouseLeave={handleSlotMouseLeave}
+                              className={`w-full bg-white border-2 ${borderColor} rounded-lg p-3 shadow-[0_2px_10px_-3px_rgba(0,0,0,0.05)] relative overflow-hidden transition-all hover:shadow-md cursor-crosshair`}
+                            >
                               
                               {/* Slot ID & % */}
                               <div className="flex justify-between items-start mb-2">
@@ -300,6 +353,65 @@ export function WarehouseVisualizer() {
               <span>MAX 5.4 m³ (Maksimal 2 Pallet @ 2.7 m³ per level)</span>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* RENDER MODAL TOOLTIP SEPERTI PADA GAMBAR SCREENSHOT */}
+      {hoveredSlot && (
+        <div 
+          className="fixed pointer-events-none z-50 bg-white text-slate-800 p-4 rounded-xl shadow-[0_10px_30px_rgba(0,0,0,0.15)] border border-slate-100 w-64 flex flex-col font-sans"
+          style={{ 
+            left: `${hoveredSlot.x + 12}px`, 
+            top: `${hoveredSlot.y + 12}px` 
+          }}
+        >
+          {/* Header Identitas Locator */}
+          <div className="flex justify-between items-center mb-1">
+            <span className="text-sm font-bold text-slate-700">
+              Locator: <span className="font-mono text-slate-900 font-black">{hoveredSlot.locId}</span>
+            </span>
+            <span className={`text-xs font-bold ${hoveredSlot.percentage >= 95 ? 'text-rose-600' : 'text-emerald-500'}`}>
+              {hoveredSlot.percentage}% Load
+            </span>
+          </div>
+
+          <div className="space-y-1 text-xs font-medium text-slate-500 border-b border-slate-100 pb-3">
+            <div>
+              Kategori Rencana: <span className="text-slate-700 font-semibold">{hoveredSlot.zoneLabel}</span>
+            </div>
+            <div>
+              Total Volume: <span className="text-slate-900 font-bold font-mono">{hoveredSlot.usedVol.toFixed(3)} m³</span> / {hoveredSlot.maxVol.toFixed(1)} m³
+            </div>
+            <div>
+              Total Berat: <span className="text-slate-900 font-bold font-mono">{hoveredSlot.totalWeight.toFixed(1)} Kg</span> <span className="text-[10px] text-slate-400 font-normal">(Safety Fallback)</span>
+            </div>
+          </div>
+
+          {/* Konten Daftar Isi Stok */}
+          <div className="mt-3">
+            <div className="text-[10px] font-extrabold text-slate-400 tracking-wider uppercase mb-2">
+              Daftar Isi Stok:
+            </div>
+            
+            {hoveredSlot.items.length === 0 ? (
+              <div className="text-xs text-slate-400 italic py-1 tracking-wide">
+                VACANT / KOSONG
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-40 overflow-y-auto pr-1">
+                {hoveredSlot.items.map((item, index) => (
+                  <div key={index} className="flex justify-between items-center bg-slate-50 px-2 py-1.5 rounded border border-slate-100 font-mono text-xs">
+                    <span className="font-bold text-indigo-600 truncate max-w-[130px]" title={item.sku}>
+                      {item.sku}
+                    </span>
+                    <span className="font-black text-slate-800 text-right bg-white px-1.5 py-0.5 rounded border border-slate-200">
+                      {item.qty} <span className="text-[10px] text-slate-400 font-bold">Qty</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
