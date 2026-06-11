@@ -3,18 +3,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Layout } from './components/Layout';
-import { Dashboard } from './components/Dashboard';
-import { Inventory } from './components/Inventory';
-import { Inbound } from './components/Inbound';
-import { Outbound } from './components/Outbound';
-import { StockLedger } from './components/StockLedger';
-import { StockBalance } from './components/StockBalance';
-import { AuditLog } from './components/AuditLog';
-import { Login } from './components/Login';
 import { seedDatabase } from './lib/db';
 import { getCurrentUser } from './lib/auth';
+
+// Lazy loading components to optimize performance limit JS initial payload
+const Dashboard = lazy(() => import('./components/Dashboard').then(module => ({ default: module.Dashboard })));
+const Inventory = lazy(() => import('./components/Inventory').then(module => ({ default: module.Inventory })));
+const Inbound = lazy(() => import('./components/Inbound').then(module => ({ default: module.Inbound })));
+const Outbound = lazy(() => import('./components/Outbound').then(module => ({ default: module.Outbound })));
+const StockLedger = lazy(() => import('./components/StockLedger').then(module => ({ default: module.StockLedger })));
+const StockBalance = lazy(() => import('./components/StockBalance').then(module => ({ default: module.StockBalance })));
+const Login = lazy(() => import('./components/Login').then(module => ({ default: module.Login })));
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
@@ -27,14 +28,26 @@ export default function App() {
     seedDatabase().then(() => setInit(true)).catch(() => setInit(true));
   }, []);
 
+  const LoadingFallback = () => (
+    <div className="flex items-center justify-center p-12 text-slate-400">
+      <div className="w-8 h-8 flex border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div>
+    </div>
+  );
+
   if (!user) {
-    return <Login onLogin={() => setUser(getCurrentUser())} />;
+    return (
+      <Suspense fallback={<LoadingFallback />}>
+        <Login onLogin={() => setUser(getCurrentUser())} />
+      </Suspense>
+    );
   }
 
   // 2. Fungsi perantara untuk mengosongkan search bar setiap kali admin pindah menu tab
   const handleTabChange = (tab: string) => {
-    setCurrentTab(tab);
-    setSearchQuery(''); 
+    if (tab !== currentTab) {
+      setCurrentTab(tab);
+      setSearchQuery(''); 
+    }
   };
 
   const renderContent = () => {
@@ -66,7 +79,9 @@ export default function App() {
       searchQuery={searchQuery}       // 4. Oper nilai state pencarian ke Layout
       onSearchChange={setSearchQuery} // 5. Oper fungsi pengubah state ke Layout
     >
-      {renderContent()}
+      <Suspense fallback={<LoadingFallback />}>
+        {renderContent()}
+      </Suspense>
     </Layout>
   );
 }

@@ -38,12 +38,13 @@ export const Login = ({ onLogin }: { onLogin: () => void }) => {
             
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Username</label>
+                <label htmlFor="username" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Username</label>
                 <div className="relative">
                   <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                    <User className="w-5 h-5" />
+                    <User className="w-5 h-5" aria-hidden="true" />
                   </div>
                   <input
+                    id="username"
                     type="text"
                     required
                     value={username}
@@ -55,12 +56,13 @@ export const Login = ({ onLogin }: { onLogin: () => void }) => {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Password</label>
+                <label htmlFor="password" className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Password</label>
                 <div className="relative">
                   <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
-                    <Lock className="w-5 h-5" />
+                    <Lock className="w-5 h-5" aria-hidden="true" />
                   </div>
                   <input
+                    id="password"
                     type="password"
                     required
                     value={password}

@@ -86,6 +86,7 @@ export function Layout({
             onClick={() => setIsMobileOpen(false)}
             className="lg:hidden p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-50 rounded-lg border border-slate-100 transition-colors cursor-pointer"
             title="Tutup Menu"
+            aria-label="Tutup Menu"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -110,7 +111,7 @@ export function Layout({
                     : 'text-slate-600 hover:text-blue-600 hover:bg-slate-50'
                 }`}
               >
-                <Icon className={`w-5 h-5 ${isActive ? 'text-blue-700' : 'text-slate-400'}`} />
+                <Icon className={`w-5 h-5 ${isActive ? 'text-blue-700' : 'text-slate-400'}`} aria-hidden="true" />
                 {tab.label}
               </button>
             );
@@ -128,7 +129,7 @@ export function Layout({
                 <p className="text-xs text-slate-500">{user ? user.role : 'Guest'}</p>
               </div>
             </div>
-            <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-600 transition-colors" title="Logout">
+            <button onClick={handleLogout} className="p-2 text-slate-400 hover:text-red-600 transition-colors" title="Logout" aria-label="Logout">
               <Power className="w-4 h-4" />
             </button>
           </div>
@@ -144,6 +145,8 @@ export function Layout({
               onClick={() => setIsMobileOpen(!isMobileOpen)}
               className="lg:hidden p-2 text-slate-500 hover:text-blue-600 hover:bg-slate-50 border border-slate-200 rounded-lg transition-colors cursor-pointer shrink-0"
               title="Buka Menu"
+              aria-label="Buka Menu"
+              aria-expanded={isMobileOpen}
             >
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -152,8 +155,9 @@ export function Layout({
             <div className="relative w-full">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input 
-                type="text" 
+                type="search" 
                 placeholder="Search SKU, Batch, or Bin..." 
+                aria-label="Search items"
                 value={activeSearchValue} // Value dikontrol oleh state
                 onChange={(e) => handleSearchChange(e.target.value)} // Memicu perubahan input
                 className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
@@ -162,19 +166,19 @@ export function Layout({
           </div>
           
           <div className="flex items-center gap-3 sm:gap-4 shrink-0">
-            <button className="relative p-2 text-slate-500 hover:text-blue-600 transition-colors">
-              <Bell className="w-5 h-5" />
+            <button className="relative p-2 text-slate-500 hover:text-blue-600 transition-colors" aria-label="Notifications">
+              <Bell className="w-5 h-5" aria-hidden="true" />
               <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
             </button>
-            <button className="p-2 text-slate-500 hover:text-blue-600 transition-colors">
-              <Settings className="w-5 h-5" />
+            <button className="p-2 text-slate-500 hover:text-blue-600 transition-colors" aria-label="Settings">
+              <Settings className="w-5 h-5" aria-hidden="true" />
             </button>
           </div>
         </header>
 
         {/* Scrollable Content */}
         <div className="flex-1 overflow-auto p-4 sm:p-6 md:p-8">
-          <div className="max-w-[1440px] mx-auto w-full">
+          <div className="w-full mx-auto">
             {children}
           </div>
         </div>
