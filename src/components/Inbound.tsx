@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, Shield, CheckCircle2, AlertCircle, Zap, Trash2, Printer, Eye, X } from 'lucide-react';
+import { Camera, Shield, CheckCircle2, AlertCircle, Zap, Trash2, Printer, Eye, X, QrCode } from 'lucide-react';
 import { Product, Locator, Transaction } from '../types';
 import { getProducts, getPutawayRecommendations, addTransaction, getTransactions, getInventoryDetails, getLocators } from '../lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentUser } from '../lib/auth';
+import { QRScanner } from './QRScanner';
 
 interface TempAllocation {
   locatorId: string;
@@ -35,6 +36,8 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
   
   // State mengontrol penampilan Live Receipt Preview Lembar Kasir
   const [receiptPreview, setReceiptPreview] = useState<ReceiptPreviewData | null>(null);
+
+  const [showScanner, setShowScanner] = useState(false);
 
   // ==========================================
   // STATE MANAGEMENT (LOCALSTORAGE)
@@ -435,16 +438,23 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs text-slate-600 mb-1 font-semibold">SKU Barang</label>
-                  <select 
-                    value={selectedSku} 
-                    onChange={e => setSelectedSku(e.target.value)}
-                    className="w-full p-2 border border-slate-300 rounded text-xs bg-white outline-none focus:border-blue-500"
-                  >
-                    <option value="">-- Pilih SKU Material --</option>
-                    {products.map(p => (
-                      <option key={p.sku} value={p.sku}>{p.sku} - {p.name}</option>
-                    ))}
-                  </select>
+                  <div className="flex gap-2">
+                    <select 
+                      value={selectedSku} 
+                      onChange={e => setSelectedSku(e.target.value)}
+                      className="flex-1 p-2 border border-slate-300 rounded text-xs bg-white outline-none focus:border-blue-500"
+                    >
+                      <option value="">-- Pilih SKU Material --</option>
+                      {products.map(p => (
+                        <option key={p.sku} value={p.sku}>{p.sku} - {p.name}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={() => setShowScanner(true)}
+                      className="px-3 bg-blue-50 border border-blue-200 rounded text-blue-600 hover:bg-blue-100 transition-colors flex items-center justify-center shrink-0"
+                      title="Scan QR Code SKU"
+                    ><QrCode className="w-4 h-4" /></button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -880,6 +890,23 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
             * Dokumen ini dicetak otomatis melalui sistem thermal WMS *
           </div>
         </div>
+      )}
+
+      {showScanner && (
+        <QRScanner 
+          onScan={(text) => {
+            const found = products.find(p => p.sku === text || p.barcode === text);
+            if (found) {
+              setSelectedSku(found.sku);
+              setShowScanner(false);
+              setMessage({ type: 'success', text: `Berhasil scan SKU: ${found.sku}` });
+            } else {
+              setMessage({ type: 'error', text: `SKU atau Barcode tidak ditemukan: ${text}` });
+              setShowScanner(false);
+            }
+          }} 
+          onClose={() => setShowScanner(false)} 
+        />
       )}
 
     </div>

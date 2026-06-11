@@ -31,11 +31,11 @@ const ZONE_COLORS: Record<ZoneCategory | string, { text: string; bg: string; bor
 };
 
 const RACK_LAYOUT = [
-  { id: 'FL A-B', label: 'Rack FL-A (A1.1 - A5.4) & Rack FL-B (B1.1 - B5.4)', racks: ['FL-A', 'FL-B'], zone: 'FG_PLUMBING' },
-  { id: 'FL C-D', label: 'Rack FL-C (C1.1 - C5.4) & Rack FL-D (D1.1 - D5.4)', racks: ['FL-C', 'FL-D'], zone: 'FG_FITTING' },
-  { id: 'FL E-F', label: 'Rack FL-E (E1.1 - E5.4) & Rack FL-F (F1.1 - F5.4)', racks: ['FL-E', 'FL-F'], zone: 'FG_FILTER' },
-  { id: 'FL G-H', label: 'Rack FL-G (G1.1 - G5.4) & Rack FL-H (H1.1 - H5.4)', racks: ['FL-G', 'FL-H'], zone: 'PACKAGING_MATERIALS' },
-  { id: 'FL-I', label: 'Rack FL-I (I1.1 - I5.4)', racks: ['FL-I'], zone: 'ASSEMBLY_KIT' },
+  { id: 'FL A-B', label: 'Rack FL-A (A1.1 - A5.4) & Rack FL-B (B1.1 - B5.4)', racks: ['FL-A', 'FL-B'], zone: 'DEFAULT' },
+  { id: 'FL C-D', label: 'Rack FL-C (C1.1 - C5.4) & Rack FL-D (D1.1 - D5.4)', racks: ['FL-C', 'FL-D'], zone: 'DEFAULT' },
+  { id: 'FL E-F', label: 'Rack FL-E (E1.1 - E5.4) & Rack FL-F (F1.1 - F5.4)', racks: ['FL-E', 'FL-F'], zone: 'DEFAULT' },
+  { id: 'FL G-H', label: 'Rack FL-G (G1.1 - G5.4) & Rack FL-H (H1.1 - H5.4)', racks: ['FL-G', 'FL-H'], zone: 'DEFAULT' },
+  { id: 'FL-I', label: 'Rack FL-I (I1.1 - I5.4)', racks: ['FL-I'], zone: 'DEFAULT' },
   { id: 'R1', label: 'Rack R1 (A1 - A10)', zone: 'FG_PLUMBING', racks: ['R1'] },
   { id: 'R2', label: 'Rack R2 (B1 - B9)', zone: 'FG_SMART_WATER', racks: ['R2'] },
   { id: 'R3', label: 'Rack R3 (C1-C9 & D1-D9)', zone: 'FG_FITTING', racks: ['R3'] },
@@ -253,9 +253,11 @@ export function WarehouseVisualizer() {
                   <span>ELEVASI DEPAN (FRONT VIEW) RAK: RACK {selectedRack}</span>
                   <span className="text-slate-400 text-xs sm:text-sm font-mono font-normal">({columns[0]} - {columns[columns.length - 1]})</span>
                 </h3>
-                <p className="text-xs sm:text-sm font-medium text-slate-600 mt-1">
-                  Kategori Zona: <span className={`font-bold ${ZONE_COLORS[rackZone]?.text || ''}`}>{ZONE_COLORS[rackZone]?.label}</span>
-                </p>
+                {selectedRack.startsWith('FL') ? null : (
+                  <p className="text-xs sm:text-sm font-medium text-slate-600 mt-1">
+                    Kategori Zona: <span className={`font-bold ${ZONE_COLORS[rackZone]?.text || ''}`}>{ZONE_COLORS[rackZone]?.label}</span>
+                  </p>
+                )}
               </div>
               <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-left sm:text-right w-full sm:w-auto shrink-0">
                 <p className="text-[9px] sm:text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">Total Volume Terpakai</p>

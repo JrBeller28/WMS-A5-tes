@@ -104,13 +104,18 @@ export const getInventoryStats = async () => {
 
 export const getInventoryDetails = async () => {
     const transactions = await getTransactions();
+    // Sort transactions chronological (oldest to newest) to correctly build FIFO queues
+    const chronologicalTxs = [...transactions].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
     const inventory: Record<string, {
       totalAvailableQty: number; 
       totalPhysicalQty: number;
-      locators: Record<string, { availableQty: number; physicalQty: number }> 
+      locators: Record<string, { availableQty: number; physicalQty: number; earliestInbound?: string }> 
     }> = {};
+
+    const fifoQueues: Record<string, { qty: number, timestamp: string }[]> = {};
     
-    for (const tx of transactions) {
+    for (const tx of chronologicalTxs) {
       if (tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
       
       if (!inventory[tx.sku]) {
@@ -119,17 +124,33 @@ export const getInventoryDetails = async () => {
       if (!inventory[tx.sku].locators[tx.locatorId]) {
         inventory[tx.sku].locators[tx.locatorId] = { availableQty: 0, physicalQty: 0 };
       }
+
+      const queueKey = `${tx.sku}_${tx.locatorId}`;
+      if (!fifoQueues[queueKey]) fifoQueues[queueKey] = [];
   
       let availableChange = tx.qty; 
       let physicalChange = 0;
   
       if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {
         physicalChange = tx.qty;
+        fifoQueues[queueKey].push({ qty: tx.qty, timestamp: tx.timestamp });
       } else if (tx.type === 'OUTBOUND') {
         if (tx.status === 'CONFIRMED') {
           physicalChange = tx.qty;
         } else if (tx.status === 'BOOKED') {
           physicalChange = 0;
+        }
+
+        // Deduct from FIFO queue
+        let remainingToDeduct = Math.abs(tx.qty);
+        while (remainingToDeduct > 0 && fifoQueues[queueKey].length > 0) {
+          if (fifoQueues[queueKey][0].qty <= remainingToDeduct) {
+             remainingToDeduct -= fifoQueues[queueKey][0].qty;
+             fifoQueues[queueKey].shift();
+          } else {
+             fifoQueues[queueKey][0].qty -= remainingToDeduct;
+             remainingToDeduct = 0;
+          }
         }
       }
   
@@ -138,6 +159,16 @@ export const getInventoryDetails = async () => {
       
       inventory[tx.sku].locators[tx.locatorId].availableQty += availableChange;
       inventory[tx.sku].locators[tx.locatorId].physicalQty += physicalChange;
+    }
+
+    // Assign earliest inbound date to each locator
+    for (const sku of Object.keys(inventory)) {
+      for (const locId of Object.keys(inventory[sku].locators)) {
+         const queueKey = `${sku}_${locId}`;
+         if (fifoQueues[queueKey] && fifoQueues[queueKey].length > 0) {
+           inventory[sku].locators[locId].earliestInbound = fifoQueues[queueKey][0].timestamp;
+         }
+      }
     }
   
     return inventory;
@@ -194,8 +225,8 @@ export const getPutawayRecommendations = async (sku: string, qty: number) => {
     let availableLocators = getAvailable(preferredLocators);
 
     if (availableLocators.length === 0) {
-      // Fallback to floating buffer locators for this zone
-      const floatingLocators = locators.filter(l => l.zone === product.category && l.rack.startsWith('FL'));
+      // Fallback to ALL floating buffer locators (FL), since they are generic now
+      const floatingLocators = locators.filter(l => l.rack.startsWith('FL'));
       availableLocators = getAvailable(floatingLocators);
       
       if (availableLocators.length === 0) {
@@ -223,15 +254,15 @@ export const seedDatabase = async () => {
         const maxVolumeM3 = 5.4; 
       
         const racksConfig = [
-          { rack: 'FL-A', prefix: ['FL-A'], cols: 5, zone: 'FG_PLUMBING' as ZoneCategory, levels: 2 },
-          { rack: 'FL-B', prefix: ['FL-B'], cols: 5, zone: 'FG_SMART_WATER' as ZoneCategory, levels: 2 },
-          { rack: 'FL-C', prefix: ['FL-C'], cols: 5, zone: 'FG_FITTING' as ZoneCategory, levels: 2 },
-          { rack: 'FL-D', prefix: ['FL-D'], cols: 5, zone: 'FG_FITTING' as ZoneCategory, levels: 2 },
-          { rack: 'FL-E', prefix: ['FL-E'], cols: 5, zone: 'FG_FILTER' as ZoneCategory, levels: 2 },
-          { rack: 'FL-F', prefix: ['FL-F'], cols: 5, zone: 'FG_FILTER' as ZoneCategory, levels: 2 },
-          { rack: 'FL-G', prefix: ['FL-G'], cols: 5, zone: 'PACKAGING_MATERIALS' as ZoneCategory, levels: 2 },
-          { rack: 'FL-H', prefix: ['FL-H'], cols: 5, zone: 'PACKAGING_MATERIALS' as ZoneCategory, levels: 2 },
-          { rack: 'FL-I', prefix: ['FL-I'], cols: 5, zone: 'ASSEMBLY_KIT' as ZoneCategory, levels: 2 },
+          { rack: 'FL-A', prefix: ['FL-A'], cols: 5, zone: 'DEFAULT' as ZoneCategory, levels: 2 },
+          { rack: 'FL-B', prefix: ['FL-B'], cols: 5, zone: 'DEFAULT' as ZoneCategory, levels: 2 },
+          { rack: 'FL-C', prefix: ['FL-C'], cols: 5, zone: 'DEFAULT' as ZoneCategory, levels: 2 },
+          { rack: 'FL-D', prefix: ['FL-D'], cols: 5, zone: 'DEFAULT' as ZoneCategory, levels: 2 },
+          { rack: 'FL-E', prefix: ['FL-E'], cols: 5, zone: 'DEFAULT' as ZoneCategory, levels: 2 },
+          { rack: 'FL-F', prefix: ['FL-F'], cols: 5, zone: 'DEFAULT' as ZoneCategory, levels: 2 },
+          { rack: 'FL-G', prefix: ['FL-G'], cols: 5, zone: 'DEFAULT' as ZoneCategory, levels: 2 },
+          { rack: 'FL-H', prefix: ['FL-H'], cols: 5, zone: 'DEFAULT' as ZoneCategory, levels: 2 },
+          { rack: 'FL-I', prefix: ['FL-I'], cols: 5, zone: 'DEFAULT' as ZoneCategory, levels: 2 },
           { rack: 'R1', prefix: ['A'], cols: 10, zone: 'FG_PLUMBING' as ZoneCategory, levels: 4 },
           { rack: 'R2', prefix: ['B'], cols: 9, zone: 'FG_SMART_WATER' as ZoneCategory, levels: 4 },
           { rack: 'R3', prefix: ['C', 'D'], cols: 9, zone: 'FG_FITTING' as ZoneCategory, levels: 4 },

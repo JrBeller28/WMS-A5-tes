@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Save, Printer, CheckCircle, Layers, AlertTriangle, Eye, X, Zap, RefreshCw } from 'lucide-react';
+import { Save, Printer, CheckCircle, Layers, AlertTriangle, Eye, X, Zap, RefreshCw, QrCode } from 'lucide-react';
 import { Product } from '../types';
-import { getProducts, getTransactions, addTransaction, updateTransactionStatus, getLocators } from '../lib/db';
+import { getProducts, getTransactions, addTransaction, updateTransactionStatus, getLocators, getInventoryDetails } from '../lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentUser } from '../lib/auth';
+import { QRScanner } from './QRScanner';
 
 interface LocatorType {
   id: string;
@@ -41,6 +42,8 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
   const [bookedTransactions, setBookedTransactions] = useState<any[]>([]);
   const [allOutboundTransactions, setAllOutboundTransactions] = useState<any[]>([]);
   const [receiptPreview, setReceiptPreview] = useState<ReceiptPreviewData | null>(null);
+
+  const [showScanner, setShowScanner] = useState(false);
 
   // Pagination State
   const [historyPageSize, setHistoryPageSize] = useState<number>(30);
@@ -93,24 +96,26 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
       setMessage(null);
     }
 
-    getTransactions().then(txs => {
-      const safeTxs = Array.isArray(txs) ? txs : [];
-      const locatorStock: Record<string, number> = {};
-      
-      for (const tx of safeTxs) {
-        if (!tx || tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
-        if (tx.sku === selectedSku) {
-          if (!locatorStock[tx.locatorId]) locatorStock[tx.locatorId] = 0;
-          locatorStock[tx.locatorId] += (tx.qty || 0); 
-        }
+    getInventoryDetails().then(inventory => {
+      const skuInv = inventory[selectedSku];
+      if (!skuInv) {
+        setAvailableStock([]);
+        setAllocations({});
+        return;
       }
       
-      const available = Object.entries(locatorStock)
-        .filter(([_, qty]) => qty > 0)
-        .map(([locId, qty]) => {
+      const available = Object.entries(skuInv.locators)
+        .filter(([_, data]) => data.availableQty > 0)
+        .map(([locId, data]) => {
           const locInfo = (locators || []).find(l => l && l.id === locId);
-          return { locatorId: locId, available: qty, rack: locInfo ? locInfo.rack : '-' };
-        });
+          return { 
+            locatorId: locId, 
+            available: data.availableQty, 
+            rack: locInfo ? locInfo.rack : '-',
+            earliestInbound: data.earliestInbound
+          };
+        })
+        .sort((a, b) => new Date(a.earliestInbound || 0).getTime() - new Date(b.earliestInbound || 0).getTime()); // Prioritas FIFO
         
       setAvailableStock(available);
       
@@ -459,16 +464,23 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
               <div className="space-y-4">
                 <div>
                   <label className="block text-xs text-slate-600 mb-1 font-semibold">SKU Barang Keluar</label>
-                  <select 
-                    value={selectedSku} 
-                    onChange={e => setSelectedSku(e.target.value)}
-                    className="w-full p-2 border border-slate-300 rounded text-xs bg-white outline-none focus:border-[#0055C4] font-medium"
-                  >
-                    <option value="">-- Pilih SKU Material --</option>
-                    {(products || []).map(p => p && (
-                      <option key={p.sku} value={p.sku}>{p.sku} - {p.name}</option>
-                    ))}
-                  </select>
+                  <div className="flex gap-2">
+                    <select 
+                      value={selectedSku} 
+                      onChange={e => setSelectedSku(e.target.value)}
+                      className="flex-1 p-2 border border-slate-300 rounded text-xs bg-white outline-none focus:border-[#0055C4] font-medium"
+                    >
+                      <option value="">-- Pilih SKU Material --</option>
+                      {(products || []).map(p => p && (
+                        <option key={p.sku} value={p.sku}>{p.sku} - {p.name}</option>
+                      ))}
+                    </select>
+                    <button 
+                      onClick={() => setShowScanner(true)}
+                      className="px-3 bg-blue-50 border border-blue-200 rounded text-blue-600 hover:bg-blue-100 transition-colors flex items-center justify-center shrink-0"
+                      title="Scan QR Code SKU"
+                    ><QrCode className="w-4 h-4" /></button>
+                  </div>
                 </div>
 
                 {selectedSku && !isVolumeInvalid && (
@@ -611,6 +623,11 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
                           <p className="text-[11px] text-slate-500 font-medium">
                             Stok Tersedia: <span className="font-bold text-slate-700">{stock.available} PCS</span>
                           </p>
+                          {stock.earliestInbound && (
+                            <p className="text-[10px] text-amber-600 font-bold mt-1">
+                              Tanggal Masuk: {new Date(stock.earliestInbound).toLocaleDateString('id-ID')}
+                            </p>
+                          )}
                         </div>
                         <div className="text-right flex items-center gap-1.5">
                           <input 
@@ -919,9 +936,9 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
         </section>
       </div>
 
-      {/* AREA PRINT NOTA STRUK */}
-      {receiptPreview && (
-        <div className="hidden print:block bg-white text-black p-0 font-mono text-[11px] leading-tight w-[76mm] mx-auto uppercase tracking-tight">
+        {/* AREA PRINT NOTA STRUK */}
+        {receiptPreview && (
+          <div className="hidden print:block bg-white text-black p-0 font-mono text-[11px] leading-tight w-[76mm] mx-auto uppercase tracking-tight">
           <div className="text-center">
             <p className="font-bold border-b border-dashed border-black pb-1">
               DOKUMEN VALID Ref: {receiptPreview.manifestId}
@@ -980,6 +997,23 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
           .print\\:block { display: block !important; position: absolute; left: 0; top: 0; width: 100%; }
         }
       `}} />
+
+      {showScanner && (
+        <QRScanner 
+          onScan={(text) => {
+            const found = products.find(p => p.sku === text || p.barcode === text);
+            if (found) {
+              setSelectedSku(found.sku);
+              setShowScanner(false);
+              setMessage({ type: 'success', text: `Berhasil scan SKU: ${found.sku}` });
+            } else {
+              setMessage({ type: 'error', text: `SKU atau Barcode tidak ditemukan: ${text}` });
+              setShowScanner(false);
+            }
+          }} 
+          onClose={() => setShowScanner(false)} 
+        />
+      )}
 
     </div>
   );

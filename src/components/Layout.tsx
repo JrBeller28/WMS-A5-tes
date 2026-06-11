@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Building2, 
   LayoutDashboard, 
@@ -14,6 +14,9 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { getCurrentUser, logoutUser } from '../lib/auth';
+import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { db } from '../firebase';
+import { Transaction } from '../types';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -34,8 +37,22 @@ export function Layout({
   onSearchChange 
 }: LayoutProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
   const user = getCurrentUser();
   
+  useEffect(() => {
+    const q = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(5));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const txs: Transaction[] = [];
+      snapshot.forEach((doc) => {
+        txs.push(doc.data() as Transaction);
+      });
+      setRecentTransactions(txs);
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Fallback state lokal jika App.tsx belum melemparkan state search global (menghindari error)
   const [localSearch, setLocalSearch] = useState('');
   const activeSearchValue = searchQuery !== undefined ? searchQuery : localSearch;
@@ -165,14 +182,53 @@ export function Layout({
             </div>
           </div>
           
-          <div className="flex items-center gap-3 sm:gap-4 shrink-0">
-            <button className="relative p-2 text-slate-500 hover:text-blue-600 transition-colors" aria-label="Notifications">
+          <div className="flex items-center gap-3 sm:gap-4 shrink-0 relative">
+            <button 
+              onClick={() => setNotificationsOpen(!notificationsOpen)}
+              className="relative p-2 text-slate-500 hover:text-blue-600 transition-colors" 
+              aria-label="Notifications"
+            >
               <Bell className="w-5 h-5" aria-hidden="true" />
-              <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+              {recentTransactions.length > 0 && (
+                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
+              )}
             </button>
-            <button className="p-2 text-slate-500 hover:text-blue-600 transition-colors" aria-label="Settings">
-              <Settings className="w-5 h-5" aria-hidden="true" />
-            </button>
+
+            {notificationsOpen && (
+              <div className="absolute right-0 top-12 w-80 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden z-50">
+                <div className="p-3 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
+                  <h3 className="text-sm font-bold text-slate-700">Realtime Updates</h3>
+                  <span className="text-xs text-slate-500">{recentTransactions.length} recent</span>
+                </div>
+                <div className="max-h-[300px] overflow-y-auto">
+                  {recentTransactions.length === 0 ? (
+                    <div className="p-4 text-center text-sm text-slate-500">No recent updates</div>
+                  ) : (
+                    <div className="flex flex-col divide-y divide-slate-100">
+                      {recentTransactions.map((tx) => (
+                        <div key={tx.id} className="p-3 hover:bg-slate-50 transition-colors">
+                          <div className="flex items-start gap-2">
+                            {tx.type === 'INBOUND' ? (
+                              <LogIn className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                            ) : (
+                              <LogOut className="w-4 h-4 text-orange-500 mt-0.5 shrink-0" />
+                            )}
+                            <div>
+                              <p className="text-xs font-semibold text-slate-800">
+                                {tx.type} • {tx.sku}
+                              </p>
+                              <p className="text-[11px] text-slate-500 mt-0.5">
+                                Qty: {tx.qty} at {tx.locatorId || 'Bin'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </header>
 
