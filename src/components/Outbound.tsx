@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { LogOut, Save, Printer, CheckCircle, Package, Layers, AlertTriangle, Info } from 'lucide-react';
+import { Save, Printer, CheckCircle, Layers, AlertTriangle, Eye, X, Zap, RefreshCw } from 'lucide-react';
 import { Product } from '../types';
 import { getProducts, getTransactions, addTransaction, updateTransactionStatus, getLocators } from '../lib/db';
 import { v4 as uuidv4 } from 'uuid';
@@ -8,7 +8,18 @@ import { getCurrentUser } from '../lib/auth';
 interface LocatorType {
   id: string;
   rack: string;
-  [key: string]: any;
+  column: string;
+  level: number;
+  zone?: string;
+  maxVolumeM3?: number;
+}
+
+interface ReceiptPreviewData {
+  manifestId: string;
+  rows: any[];
+  operator: string;
+  date: string;
+  memo: string;
 }
 
 export function Outbound() {
@@ -19,26 +30,33 @@ export function Outbound() {
   const [selectedSku, setSelectedSku] = useState('');
   const [targetQty, setTargetQty] = useState('');
   const [memo, setMemo] = useState('');
+  const [editingManifestId, setEditingManifestId] = useState<string | null>(null);
   
   // Stock & Allocation State
   const [availableStock, setAvailableStock] = useState<{locatorId: string, available: number, rack: string}[]>([]);
   const [allocations, setAllocations] = useState<Record<string, number>>({});
+  const [message, setMessage] = useState<{type: 'success'|'error', text: string} | null>(null);
   
+  // Transactions State
   const [bookedTransactions, setBookedTransactions] = useState<any[]>([]);
+  const [allOutboundTransactions, setAllOutboundTransactions] = useState<any[]>([]);
+  const [receiptPreview, setReceiptPreview] = useState<ReceiptPreviewData | null>(null);
 
-  const refreshBookedTransactions = () => {
+  const refreshTransactionsData = () => {
     getTransactions().then(txs => {
-        setBookedTransactions(txs.filter(tx => tx.status === 'BOOKED' && tx.type === 'OUTBOUND'));
+        const outboundTxs = txs.filter(tx => tx.type === 'OUTBOUND');
+        setAllOutboundTransactions(outboundTxs.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()));
+        setBookedTransactions(outboundTxs.filter(tx => tx.status === 'BOOKED'));
     }).catch(console.error);
-  }
+  };
 
   useEffect(() => {
     getProducts().then(setProducts).catch(console.error);
     getLocators().then(setLocators).catch(console.error);
-    refreshBookedTransactions();
+    refreshTransactionsData();
   }, []);
 
-  // 1. Fetch stok per locator saat SKU dipilih
+  // Ambil data ketersediaan stok material di gudang secara real-time berdasarkan SKU terpilih
   useEffect(() => {
     if (!selectedSku) {
       setAvailableStock([]);
@@ -52,7 +70,7 @@ export function Outbound() {
         if (tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
         if (tx.sku === selectedSku) {
           if (!locatorStock[tx.locatorId]) locatorStock[tx.locatorId] = 0;
-          locatorStock[tx.locatorId] += tx.qty;
+          locatorStock[tx.locatorId] += tx.qty; 
         }
       }
       
@@ -64,12 +82,17 @@ export function Outbound() {
         });
         
       setAvailableStock(available);
-      setAllocations({});
+      
+      if (!editingManifestId) {
+        setAllocations({});
+      }
     }).catch(console.error);
   }, [selectedSku, locators]);
 
-  // 2. Auto-alokasi stok saat target Qty diisi (Konsep FIFO sederhana)
+  // Kalkulasi Auto-Alokasi FIFO Rencana Pengambilan Barang (AI Recommendation Core)
   useEffect(() => {
+    if (editingManifestId) return; 
+    
     const qty = parseInt(targetQty);
     if (!qty || qty <= 0 || availableStock.length === 0) {
       setAllocations({});
@@ -87,19 +110,30 @@ export function Outbound() {
     }
 
     setAllocations(newAlloc);
-  }, [targetQty, availableStock]);
+  }, [targetQty, availableStock, editingManifestId]);
 
-  // Handle manual input allocation by user
-  const handleAllocationChange = (locatorId: string, val: string) => {
-    const numVal = parseInt(val) || 0;
-    setAllocations(prev => ({
-      ...prev,
-      [locatorId]: numVal
-    }));
-  };
+  const totalAvailable = useMemo(() => availableStock.reduce((sum, item) => sum + item.available, 0), [availableStock]);
+  const totalAllocated = useMemo(() => Object.values(allocations).reduce((sum, qty) => sum + (qty || 0), 0), [allocations]);
+  const unallocatedQty = Math.max(0, Number(targetQty || 0) - totalAllocated);
+  const isTargetMet = parseInt(targetQty) > 0 && totalAllocated === parseInt(targetQty);
+  const isExceedingStock = parseInt(targetQty) > totalAvailable && !editingManifestId;
 
-  // Handler Pengelompokan: Memuat kembali seluruh locator dari transaksi manifes yang sama
+  // Menghasilkan string rekomendasi alokasi slot dinamis untuk banner AI
+  const aiRecommendationSlots = useMemo(() => {
+    if (!selectedSku) return 'Silakan tentukan SKU material terlebih dahulu';
+    if (!targetQty || Number(targetQty) <= 0) return 'Masukkan kuantitas target pick untuk memetakan lokasi';
+    
+    const activeSlots = Object.entries(allocations)
+      .filter(([_, qty]) => qty > 0)
+      .map(([locId, qty]) => `${locId} (${qty} PCS)`)
+      .sort();
+
+    if (activeSlots.length === 0) return 'Stok material tidak ditemukan di slot manapun';
+    return activeSlots.join(', ');
+  }, [allocations, selectedSku, targetQty]);
+
   const handleReviewPendingGroup = (group: any) => {
+    setEditingManifestId(group.manifestId);
     setSelectedSku(group.sku);
     setTargetQty(group.totalQty.toString());
     setMemo(group.memo || '');
@@ -109,15 +143,119 @@ export function Outbound() {
       newAllocations[item.locatorId] = Math.abs(item.qty);
     });
     setAllocations(newAllocations);
+
+    setMessage({ type: 'success', text: 'Data grup berhasil dimuat ke dalam form pembungkusan.' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Calculations for UI Validation
-  const totalAvailable = useMemo(() => availableStock.reduce((sum, item) => sum + item.available, 0), [availableStock]);
-  const totalAllocated = useMemo(() => Object.values(allocations).reduce((sum, qty) => sum + (qty || 0), 0), [allocations]);
-  const isTargetMet = parseInt(targetQty) > 0 && totalAllocated === parseInt(targetQty);
-  const isExceedingStock = parseInt(targetQty) > totalAvailable;
+  const handleCancelEdit = () => {
+    setEditingManifestId(null);
+    setSelectedSku('');
+    setTargetQty('');
+    setAllocations({});
+    setMemo('');
+    setMessage(null);
+  };
 
-  // Mengelompokkan transaksi pending berdasarkan manifestId / kombinasi unik untuk tampilan tabel
+  const handleSaveBook = async () => {
+    if (!selectedSku || !targetQty || !isTargetMet) return;
+    
+    const user = getCurrentUser();
+    const operatorName = user ? user.name : 'IWAN GUNAWAN';
+    
+    try {
+      if (editingManifestId) {
+        const oldTransactions = bookedTransactions.filter(tx => tx.manifestId === editingManifestId);
+        for (const oldTx of oldTransactions) {
+          await updateTransactionStatus(oldTx.id, 'CANCELLED');
+        }
+      }
+
+      const activeManifestId = editingManifestId || 'MFS-OUT-' + uuidv4().slice(0,8).toUpperCase();
+      
+      for (const [locatorId, pickQty] of Object.entries(allocations)) {
+        if (pickQty > 0) {
+          const tx = {
+            id: uuidv4(),
+            manifestId: activeManifestId, 
+            type: 'OUTBOUND' as const,
+            sku: selectedSku,
+            qty: -pickQty, 
+            locatorId: locatorId,
+            operator: operatorName,
+            timestamp: new Date().toISOString(),
+            status: 'BOOKED' as const,
+            memo
+          };
+          await addTransaction(tx);
+        }
+      }
+
+      setMessage({ 
+        type: 'success', 
+        text: editingManifestId ? 'Alokasi manifes berhasil diperbarui!' : 'Alokasi berhasil ditambahkan ke manifes pending.' 
+      });
+      
+      setEditingManifestId(null);
+      setSelectedSku('');
+      setTargetQty('');
+      setAllocations({});
+      setMemo('');
+      refreshTransactionsData();
+      setTimeout(() => setMessage(null), 3000);
+    } catch (err: any) {
+      setMessage({ type: 'error', text: err.message || "Gagal menyimpan alokasi." });
+    }
+  };
+
+  const handleConfirmAllManifest = async () => {
+    if (bookedTransactions.length === 0) return;
+    try {
+      const user = getCurrentUser();
+      const operatorName = user ? user.name : 'IWAN GUNAWAN';
+      const now = new Date();
+      const formattedDate = `${now.getDate()}/${now.getMonth() + 1}/${String(now.getFullYear()).slice(-2)}, ${String(now.getHours()).padStart(2, '0')}.${String(now.getMinutes()).padStart(2, '0')}.${String(now.getSeconds()).padStart(2, '0')}`;
+
+      const primaryManifestId = bookedTransactions[0].manifestId || 'MFS-OUT-' + uuidv4().slice(0,8).toUpperCase();
+
+      const rows = bookedTransactions.map(tx => {
+        const prod = products.find(p => p.sku === tx.sku);
+        return {
+          sku: tx.sku,
+          name: prod ? prod.name : 'Unknown Product',
+          qty: Math.abs(tx.qty),
+          locatorId: tx.locatorId
+        };
+      });
+
+      for (const tx of bookedTransactions) {
+        await updateTransactionStatus(tx.id, 'CONFIRMED');
+      }
+
+      setReceiptPreview({
+        manifestId: primaryManifestId,
+        rows,
+        operator: operatorName,
+        date: formattedDate,
+        memo: bookedTransactions[0].memo || '-'
+      });
+
+      setEditingManifestId(null);
+      setSelectedSku('');
+      setTargetQty('');
+      setAllocations({});
+      setMemo('');
+      setAvailableStock([]);
+      refreshTransactionsData();
+
+      setMessage({ type: 'success', text: 'Konfirmasi dispatch sukses! Dokumen nota keluar siap dicetak.' });
+      setTimeout(() => setMessage(null), 3500);
+    } catch (e: any) {
+      setMessage({ type: 'error', text: "Gagal memproses konfirmasi transaksi." });
+    }
+  };
+
+  // Grouping Antrean Pending Manifest
   const groupedPendingTransactions = useMemo(() => {
     const groups: Record<string, {
       manifestId: string;
@@ -126,10 +264,10 @@ export function Outbound() {
       memo: string;
       totalQty: number;
       items: any[];
+      operator: string;
     }> = {};
 
     bookedTransactions.forEach(tx => {
-      // Gunakan manifestId bawaan, atau fallback ke kombinasi SKU + waktu jika data lama tidak punya ID grup
       const groupKey = tx.manifestId || `${tx.sku}-${tx.timestamp}`;
       if (!groups[groupKey]) {
         groups[groupKey] = {
@@ -138,7 +276,8 @@ export function Outbound() {
           sku: tx.sku,
           memo: tx.memo || '',
           totalQty: 0,
-          items: []
+          items: [],
+          operator: tx.operator || 'SYSTEM'
         };
       }
       groups[groupKey].totalQty += Math.abs(tx.qty);
@@ -148,441 +287,546 @@ export function Outbound() {
     return Object.values(groups);
   }, [bookedTransactions]);
 
-  const handleSaveBook = async () => {
-    if (!selectedSku || !targetQty || !isTargetMet) return;
-    
-    const user = getCurrentUser();
-    const manifestId = uuidv4(); // Buat 1 Manifest ID tunggal untuk semua alokasi di form ini
-    
-    try {
-      // Daftarkan transaksi dengan Manifest ID yang sama agar terkelompok
-      for (const [locatorId, pickQty] of Object.entries(allocations)) {
-        if (pickQty > 0) {
-          const tx = {
-            id: uuidv4(),
-            manifestId, 
-            type: 'OUTBOUND' as const,
-            sku: selectedSku,
-            qty: -pickQty,
-            locatorId: locatorId,
-            operator: user ? user.name : 'Unknown User',
-            timestamp: new Date().toISOString(),
-            status: 'BOOKED' as const,
-            memo
-          };
-          await addTransaction(tx);
-        }
-      }
+  // Grouping Utama Semua Riwayat Transaksi Outbound (Menjadi 1 Baris tunggal per Manifest ID)
+  const aggregatedHistoryTransactions = useMemo(() => {
+    const groups: Record<string, {
+      manifestId: string;
+      timestamp: string;
+      sku: string;
+      locatorsList: string[];
+      totalQty: number;
+      operator: string;
+      memo: string;
+      status: string;
+      rawItems: any[];
+    }> = {};
 
-      // Reset form input utama
-      setSelectedSku('');
-      setTargetQty('');
-      setAllocations({});
-      setMemo('');
-      refreshBookedTransactions();
-    } catch (err: any) {
-      alert(err.message || "Error processing outbound transaction");
-    }
-  };
-
-  const handleConfirm = async () => {
-    if (bookedTransactions.length === 0) return;
-    try {
-      for (const tx of bookedTransactions) {
-        await updateTransactionStatus(tx.id, 'CONFIRMED');
+    allOutboundTransactions.forEach(tx => {
+      const key = tx.manifestId || tx.id;
+      if (!groups[key]) {
+        groups[key] = {
+          manifestId: tx.manifestId || '-',
+          timestamp: tx.timestamp,
+          sku: tx.sku,
+          locatorsList: [],
+          totalQty: 0,
+          operator: tx.operator || 'SYSTEM',
+          memo: tx.memo || '-',
+          status: tx.status,
+          rawItems: []
+        };
       }
-      alert('All Manifest Transactions Confirmed!');
       
-      // RESET TOTAL FORM & STATE SEPERTI SEMULA
-      setSelectedSku('');
-      setTargetQty('');
-      setAllocations({});
-      setMemo('');
-      setAvailableStock([]);
-      
-      refreshBookedTransactions();
-    } catch (e: any) {
-      alert(e.message || "Error confirming transactions");
-    }
+      if (tx.locatorId && !groups[key].locatorsList.includes(tx.locatorId)) {
+        groups[key].locatorsList.push(tx.locatorId);
+      }
+      groups[key].totalQty += Math.abs(tx.qty);
+      groups[key].rawItems.push(tx);
+    });
+
+    return Object.values(groups);
+  }, [allOutboundTransactions]);
+
+  const handlePreviewHistorical = (group: any) => {
+    const txDate = new Date(group.timestamp);
+    const formattedDate = `${txDate.getDate()}/${txDate.getMonth() + 1}/${String(txDate.getFullYear()).slice(-2)}, ${String(txDate.getHours()).padStart(2, '0')}.${String(txDate.getMinutes()).padStart(2, '0')}.${String(txDate.getSeconds()).padStart(2, '0')}`;
+
+    const rows = group.rawItems.map((item: any) => {
+      const prod = products.find(p => p.sku === item.sku);
+      return {
+        sku: item.sku,
+        name: prod ? prod.name : 'Unknown Product',
+        qty: Math.abs(item.qty),
+        locatorId: item.locatorId
+      };
+    });
+
+    setReceiptPreview({
+      manifestId: group.manifestId,
+      rows,
+      operator: group.operator,
+      date: formattedDate,
+      memo: group.memo || '-'
+    });
+
+    setTimeout(() => {
+      document.getElementById('thermal-preview-section')?.scrollIntoView({ behavior: 'smooth' });
+    }, 150);
   };
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-end">
-        <div>
-          <h2 className="text-3xl font-bold text-slate-800 tracking-tight">Outbound Dispatch</h2>
-          <p className="text-slate-500 mt-1 text-sm">Select SKU, define total quantity, and allocate from racks.</p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* FORM SECTION (Left side - 7 cols) */}
-        <section className="lg:col-span-7 bg-white border border-slate-200 rounded-xl p-6 md:p-8 shadow-sm flex flex-col gap-6">
-          <h3 className="text-xl font-bold flex items-center gap-2 text-slate-800 border-b border-slate-100 pb-4">
-            <LogOut className="text-blue-600 w-6 h-6" />
-            Pick Plan
-          </h3>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="md:col-span-2">
-              <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
-                <Package className="w-4 h-4 text-slate-400" />
-                Select SKU
-              </label>
-              <select 
-                value={selectedSku} 
-                onChange={e => setSelectedSku(e.target.value)}
-                className="w-full p-3.5 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all font-medium text-slate-700"
-              >
-                <option value="">-- Type or Choose Product --</option>
-                {products.map(p => (
-                  <option key={p.sku} value={p.sku}>{p.sku} - {p.name}</option>
-                ))}
-              </select>
-            </div>
-
-            {selectedSku && (
-              <div className="md:col-span-2 animate-in fade-in slide-in-from-top-2">
-                <label className="block text-sm font-bold text-slate-700 mb-2">Total Pick Quantity</label>
-                <div className="relative">
-                  <input 
-                    type="number" 
-                    value={targetQty}
-                    onChange={e => setTargetQty(e.target.value)}
-                    placeholder="e.g. 150"
-                    min="1"
-                    className="w-full p-4 border border-slate-200 rounded-lg bg-slate-50 text-xl font-bold focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                  />
-                  {selectedSku && (
-                    <div className={`absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold ${isExceedingStock ? 'text-red-500' : 'text-slate-400'}`}>
-                      Max: {totalAvailable}
-                    </div>
-                  )}
-                </div>
-                {isExceedingStock && (
-                  <p className="text-red-500 text-sm mt-2 flex items-center gap-1 font-medium">
-                    <AlertTriangle className="w-4 h-4" /> Requested quantity exceeds total available stock!
-                  </p>
-                )}
-              </div>
-            )}
+    <div className="space-y-6 max-w-[1200px] mx-auto p-4">
+      
+      {/* INTERFACES UTAMA */}
+      <div className="print:hidden space-y-6">
+        <div className="flex justify-between items-start">
+          <div>
+            <h2 className="text-2xl font-bold text-[#0F294D] tracking-tight">Directed Picking (Outbound)</h2>
+            <p className="text-slate-500 mt-1 text-xs">Multi-rack allocation routing interface. Ambil pecahan kuantitas barang dari beberapa rak secara sistematis.</p>
           </div>
+          <div className="bg-[#0055C4] text-white px-3 py-1.5 rounded font-bold text-xs flex items-center gap-1.5 shadow-sm">
+            <Zap className="w-3.5 h-3.5 fill-white" />
+            Multi-Rack Pick Active
+          </div>
+        </div>
 
-          {/* RACK/LOCATOR ALLOCATION SECTION */}
-          {selectedSku && parseInt(targetQty) > 0 && !isExceedingStock && (
-            <div className="mt-4 pt-6 border-t border-slate-100 animate-in fade-in">
-              <div className="flex justify-between items-end mb-4">
-                <label className="block text-sm font-bold text-slate-700 flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-slate-400" />
-                  Locator Allocation
-                </label>
-                <span className={`text-sm font-bold px-3 py-1 rounded-full ${isTargetMet ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                  Allocated: {totalAllocated} / {targetQty}
-                </span>
-              </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          {/* Form Input Pelayan Gudang */}
+          <section className="col-span-12 lg:col-span-5 bg-white border border-slate-200 rounded-lg p-5 shadow-sm flex flex-col justify-between">
+            <div>
+              <h3 className="text-sm font-bold mb-4 flex items-center gap-1.5 text-[#0055C4] uppercase tracking-wider">
+                <span className="w-1 h-4 bg-[#0055C4] block rounded"></span>
+                {editingManifestId ? 'Edit Dispatch Entry' : 'Batch Dispatch Entry'}
+              </h3>
 
-              {availableStock.length === 0 ? (
-                <div className="p-4 bg-red-50 text-red-600 rounded-lg text-sm font-medium border border-red-100">
-                  No stock available for this SKU.
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {availableStock.map((stock) => {
-                    const currentAlloc = allocations[stock.locatorId] || '';
-                    const isExceedingLocatorStock = (allocations[stock.locatorId] || 0) > stock.available;
-
-                    return (
-                      <div key={stock.locatorId} className={`flex items-center justify-between p-3 border rounded-lg transition-colors ${Number(currentAlloc) > 0 ? 'bg-blue-50 border-blue-200' : 'bg-white border-slate-200'}`}>
-                        <div>
-                          <div className="font-bold text-slate-800">{stock.locatorId}</div>
-                          <div className="text-xs text-slate-500 font-mono mt-0.5">Rack: {stock.rack} | Avail: {stock.available}</div>
-                        </div>
-                        <div className="flex items-center gap-3">
-                          <input 
-                            type="number"
-                            value={currentAlloc}
-                            onChange={(e) => handleAllocationChange(stock.locatorId, e.target.value)}
-                            className={`w-24 p-2 text-center font-bold border rounded bg-white ${isExceedingLocatorStock ? 'border-red-500 text-red-600 focus:ring-red-500' : 'border-slate-300 text-slate-800 focus:ring-blue-500'}`}
-                            placeholder="0"
-                          />
-                        </div>
-                      </div>
-                    )
-                  })}
+              {editingManifestId && (
+                <div className="mb-3 p-2 bg-amber-50 border border-amber-200 text-amber-800 rounded text-[11px] flex justify-between items-center font-medium">
+                  <span>Mengubah Manifest: <strong>{editingManifestId.slice(0, 8)}...</strong></span>
+                  <button onClick={handleCancelEdit} className="text-xs underline text-red-600 font-bold hover:text-red-800">Batal</button>
                 </div>
               )}
 
-              <div className="mt-6 space-y-4">
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">Memo / Notes (Optional)</label>
+                  <label className="block text-xs text-slate-600 mb-1 font-semibold">SKU Barang Keluar</label>
+                  <select 
+                    value={selectedSku} 
+                    onChange={e => setSelectedSku(e.target.value)}
+                    className="w-full p-2 border border-slate-300 rounded text-xs bg-white outline-none focus:border-[#0055C4] font-medium"
+                  >
+                    <option value="">-- Pilih SKU Material --</option>
+                    {products.map(p => (
+                      <option key={p.sku} value={p.sku}>{p.sku} - {p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {selectedSku && (
+                  <div className="grid grid-cols-2 gap-3 animate-fadeIn">
+                    <div>
+                      <label className="block text-xs text-slate-600 mb-1 font-semibold">Total Qty Pick</label>
+                      <input 
+                        type="number" 
+                        value={targetQty}
+                        onChange={e => setTargetQty(e.target.value)}
+                        placeholder="Contoh: 50"
+                        min="1"
+                        className="w-full p-2 border border-slate-300 rounded text-xs outline-none focus:border-[#0055C4] font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-slate-600 mb-1 font-semibold">Stok Tersedia</label>
+                      <input 
+                        type="text" 
+                        value={`${totalAvailable} PCS`}
+                        readOnly
+                        className={`w-full p-2 border border-slate-300 rounded text-xs font-bold bg-slate-50 ${isExceedingStock ? 'text-red-600' : 'text-slate-700'}`}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {Number(targetQty) > 0 && !isExceedingStock && (
+                  <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-[11px] space-y-1 font-medium animate-fadeIn">
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Sisa Belum Teralokasi:</span>
+                      <span className={`font-bold ${unallocatedQty > 0 ? 'text-blue-600' : 'text-emerald-600'}`}>{unallocatedQty} PCS</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Total Siap Diambil:</span>
+                      <span className="font-bold text-[#0055C4]">{totalAllocated} / {targetQty} PCS</span>
+                    </div>
+                  </div>
+                )}
+
+                {isExceedingStock && (
+                  <div className="p-2 bg-red-50 text-red-700 border border-red-200 rounded text-[11px] font-bold flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    Jumlah permintaan melebihi total stok gudang!
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-xs text-slate-600 mb-1 font-semibold">Memo / Referensi PO</label>
                   <input 
                     type="text" 
                     value={memo}
                     onChange={e => setMemo(e.target.value)}
-                    placeholder="Reference PO or reason..."
-                    className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all"
+                    placeholder="Referensi nomor dokumen outbound..."
+                    className="w-full p-2 border border-slate-300 rounded text-xs outline-none focus:border-[#0055C4]"
                   />
                 </div>
 
-                <button 
-                  onClick={handleSaveBook}
-                  disabled={!isTargetMet}
-                  className="w-full bg-blue-700 text-white py-3.5 rounded-lg font-bold flex items-center justify-center gap-2 hover:bg-blue-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm"
-                >
-                  <Save className="w-5 h-5" />
-                  {isTargetMet ? 'Add to Manifest List' : 'Complete Allocation to Save'}
-                </button>
+                {message && (
+                  <div className={`p-2 rounded text-[11px] font-bold ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700 flex items-start gap-1'}`}>
+                    {message.type === 'error' && <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />}
+                    {message.text}
+                  </div>
+                )}
               </div>
             </div>
-          )}
-        </section>
 
-        {/* MANIFEST / PRINT SECTION (Right side - 5 cols) */}
-        <section className="lg:col-span-5 flex flex-col gap-6">
-          {bookedTransactions.length === 0 ? (
-            /* EMPTY STATE - Dark Mode Theme */
-            <div className="bg-[#1e293b] rounded-xl p-6 shadow-md text-white flex-1 flex flex-col justify-between relative overflow-hidden min-h-[320px]">
-              <div className="absolute top-0 right-0 -mr-8 -mt-8 opacity-10">
-                <Printer className="w-48 h-48 text-white" />
-              </div>
-              <div className="relative z-10">
-                <h3 className="text-xl font-bold mb-1 tracking-wide">Manifest Summary</h3>
-                <p className="text-slate-400 text-xs font-normal">Transactions ready for confirmation.</p>
-              </div>
-              <div className="flex flex-col items-center justify-center flex-1 py-12 text-slate-500 relative z-10">
-                <Info className="w-12 h-12 mb-3 opacity-30 text-slate-400" />
-                <p className="text-sm font-normal text-slate-400">No items booked yet.</p>
-              </div>
+            <div className="pt-4 mt-4 border-t border-slate-100 space-y-2">
+              <button 
+                onClick={handleSaveBook}
+                disabled={!isTargetMet}
+                className="w-full bg-[#059669] font-bold text-white py-2.5 rounded text-xs flex items-center justify-center gap-1.5 hover:bg-emerald-700 transition-colors disabled:opacity-40"
+              >
+                <Save className="w-3.5 h-3.5" />
+                {editingManifestId ? 'Perbarui Alokasi Manifes' : 'Simpan Alokasi Pick Ke Manifes'}
+              </button>
+
+              {bookedTransactions.length > 0 && (
+                <div className="pt-2 border-t border-dashed border-slate-200 mt-2">
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-[10px] font-black text-slate-600 uppercase">Antrean Manifest Pick:</h4>
+                    <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[9px] font-bold rounded">{bookedTransactions.length} Items</span>
+                  </div>
+                  <button 
+                    onClick={handleConfirmAllManifest}
+                    className="w-full bg-[#0055C4] font-bold text-white py-2.5 rounded text-xs flex items-center justify-center gap-1.5 hover:bg-blue-800 transition-colors"
+                  >
+                    <CheckCircle className="w-3.5 h-3.5" />
+                    Confirm Pick & Cetak Nota
+                  </button>
+                </div>
+              )}
             </div>
-          ) : (
-            /* FILLED STATE - Layout Nota Fisik Terintegrasi */
-            <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-6 flex flex-col justify-between flex-1 animate-in fade-in">
-              <div>
-                <h3 className="text-lg font-bold text-slate-800 mb-4 tracking-tight">Manifest Summary</h3>
-                
-                {/* Dokumen Fisik Nota */}
-                <div className="border border-slate-800 rounded-md p-5 bg-white text-slate-900 shadow-sm font-mono">
-                  <div className="text-center mb-4">
-                    <h4 className="text-lg font-black uppercase tracking-wider text-slate-950">GUDANG PSN</h4>
-                    <p className="text-[10px] font-bold tracking-widest text-slate-700 mt-0.5">PENGELUARAN BARANG</p>
-                  </div>
-                  
-                  <div className="border-b border-slate-800 my-3"></div>
+          </section>
 
-                  <table className="w-full text-left text-[11px] border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-800">
-                        <th className="pb-1 font-bold">SKU</th>
-                        <th className="pb-1 font-bold">RACK</th>
-                        <th className="pb-1 font-bold">LOCATOR</th>
-                        <th className="pb-1 font-bold text-right">QTY</th>
-                        <th className="pb-1 font-bold pl-2">MEMO</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 divide-dashed">
-                      {bookedTransactions.map(tx => {
-                        const locInfo = locators.find(l => l.id === tx.locatorId);
-                        return (
-                          <tr key={tx.id} className="text-slate-900 font-medium">
-                            <td className="py-2 pr-1 truncate max-w-[90px] font-bold">{tx.sku}</td>
-                            <td className="py-2 text-slate-700">{locInfo ? locInfo.rack : '-'}</td>
-                            <td className="py-2 text-slate-700 font-mono text-[10px]">{tx.locatorId}</td>
-                            <td className="py-2 text-right font-black text-slate-950">{Math.abs(tx.qty)}</td>
-                            <td className="py-2 pl-2 text-slate-600 text-[10px] truncate max-w-[60px]">{tx.memo || '-'}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
+          {/* AI Recommendation Section Panel */}
+          <section className="col-span-12 lg:col-span-7 flex flex-col justify-start">
+            
+            {/* TAMPILAN BANNER AI RECOMMENDATION PERBAIKAN TOTAL */}
+            <div className="bg-[#0055C4] text-white rounded-lg p-5 shadow-md flex flex-col justify-center border-l-4 border-emerald-400">
+              <div className="flex items-center gap-2">
+                <span className="bg-white/20 text-[9px] font-black px-2 py-0.5 rounded tracking-widest uppercase text-white font-mono">
+                  AI RECOMMENDATION ACTIVE
+                </span>
+              </div>
+              <h3 className="text-base font-normal mt-2 leading-snug">
+                Rekomendasi Utama Penempatan Slot:{' '}
+                <span className="font-mono font-black text-emerald-300 underline decoration-2 decoration-emerald-400 tracking-wide block sm:inline mt-1 sm:mt-0">
+                  {aiRecommendationSlots}
+                </span>
+              </h3>
+              <p className="text-[11px] text-blue-100 mt-2 font-normal">
+                Sistem otomatis memetakan letak rak berdasarkan metode alokasi ketersediaan stok terkini di dalam gudang secara seimbang.
+              </p>
+            </div>
 
-                  {/* Garis Tanda Tangan */}
-                  <div className="mt-8 flex justify-between px-2 text-[10px]">
-                    <div className="text-center">
-                      <div className="h-10 border-b border-slate-400 w-24 mx-auto"></div>
-                      <p className="font-bold text-slate-700 mt-1 uppercase tracking-wide text-[9px]">Operator</p>
-                    </div>
-                    <div className="text-center">
-                      <div className="h-10 border-b border-slate-400 w-24 mx-auto"></div>
-                      <p className="font-bold text-slate-700 mt-1 uppercase tracking-wide text-[9px]">Admin Gudang</p>
-                    </div>
-                  </div>
+            {Object.keys(allocations).length > 0 && (
+              <div className="mt-4 bg-white border border-slate-200 rounded-lg p-4 shadow-sm animate-fadeIn">
+                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">Detail Jalur Pengambilan Barang (Routing):</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {Object.entries(allocations).map(([locId, qty]) => (
+                    qty > 0 && (
+                      <div key={locId} className="flex items-center justify-between p-2.5 border border-slate-100 rounded bg-slate-50/50">
+                        <div>
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">LOKASI RAK</p>
+                          <p className="text-xs font-mono font-black text-slate-800">SLOT {locId}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[10px] text-slate-400 font-bold uppercase">AMBIL QUANTITY</p>
+                          <p className="text-xs font-mono font-black text-red-600">-{qty} PCS</p>
+                        </div>
+                      </div>
+                    )
+                  ))}
                 </div>
               </div>
+            )}
+          </section>
+        </div>
 
-              {/* Tombol Cetak / Konfirmasi */}
-              <div className="mt-5 flex flex-col gap-2.5">
+        {/* PREVIEW NOTA MANIFEST OUTBOUND */}
+        {receiptPreview && (
+          <div id="thermal-preview-section" className="bg-slate-100 rounded-lg p-6 border border-slate-300 flex flex-col items-center justify-center gap-4 transition-all animate-fadeIn">
+            <div className="w-full flex justify-between items-center max-w-[400px]">
+              <span className="text-xs font-black text-slate-600 uppercase tracking-wider flex items-center gap-1">
+                <Printer className="w-3.5 h-3.5 text-blue-600" /> Live Receipt Preview (Nota Keluar)
+              </span>
+              <div className="flex gap-2">
                 <button 
                   onClick={() => window.print()}
-                  className="w-full bg-[#1e293b] hover:bg-slate-800 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-colors shadow-sm text-sm"
+                  className="bg-[#0055C4] hover:bg-blue-800 text-white text-[11px] px-2.5 py-1 rounded font-bold flex items-center gap-1 transition-colors"
                 >
-                  <Printer className="w-4 h-4" />
-                  Print PDF
+                  Print Struk
                 </button>
-                
                 <button 
-                  onClick={handleConfirm}
-                  className="w-full bg-[#059669] hover:bg-emerald-700 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-colors shadow-md text-sm"
+                  onClick={() => setReceiptPreview(null)}
+                  className="bg-slate-300 hover:bg-slate-400 text-slate-700 text-[11px] p-1 rounded transition-colors"
+                  title="Tutup Preview"
                 >
-                  <CheckCircle className="w-4 h-4" />
-                  Confirm Pick (Manifest)
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
             </div>
-          )}
-        </section>
-      </div>
+            
+            <div className="bg-white text-black p-5 font-mono text-[11px] leading-tight w-[100%] max-w-[400px] border border-slate-300 shadow-md uppercase">
+              <div className="text-center">
+                <p className="font-bold border-b border-dashed border-black pb-1">
+                  DOKUMEN VALID Ref: {receiptPreview.manifestId}
+                </p>
+                <p className="font-bold tracking-wide pt-1 text-xs text-slate-950">
+                  BARANG KELUAR (OUTBOUND)
+                </p>
+              </div>
 
-      {/* PENDING BOOKED TRANSACTIONS LOG - Terkelompok Menjadi 1 Baris Per Transaksi */}
-      {groupedPendingTransactions.length > 0 && (
-        <section className="bg-white border border-slate-200 rounded-xl p-6 md:p-8 shadow-sm mt-6 animate-in fade-in">
-          <div className="flex items-center gap-2.5 mb-5 border-b border-slate-100 pb-4">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#c2410c]"></span>
-            <h3 className="text-lg font-bold text-[#9a3412] tracking-tight">
-              Pending Booked Transactions
-            </h3>
+              <div className="border-b border-dashed border-black my-2"></div>
+
+              <div className="space-y-1 text-left text-[10px]">
+                <p><span className="font-bold">WAKTU VALIDASI SUKSES:</span> <span className="font-sans normal-case">{receiptPreview.date}</span></p>
+                <p><span className="font-bold">OPERATOR GUDANG:</span> {receiptPreview.operator}</p>
+                <p><span className="font-bold">MEMO / REFERENSI:</span> <span className="normal-case">{receiptPreview.memo}</span></p>
+              </div>
+
+              <div className="border-b border-dashed border-black my-2"></div>
+
+              <p className="font-bold text-left text-[10px] mb-1.5">
+                DAFTAR HASIL DISTRIBUSI MULTI-RAK (PICKING ALOKASI):
+              </p>
+
+              <table className="w-full text-left border-collapse text-[10px]">
+                <thead>
+                  <tr className="border-b border-black align-bottom">
+                    <th className="py-1 font-bold w-[30%]">ITEM SKU</th>
+                    <th className="py-1 font-bold w-[35%]">NAMA PRODUK</th>
+                    <th className="py-1 font-bold text-center w-[15%]">KUANTITAS KELUAR</th>
+                    <th className="py-1 font-bold text-right w-[20%]">TARGET SLOT RAK</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-dashed divide-slate-300">
+                  {receiptPreview.rows.map((item, idx) => (
+                    <tr key={idx} className="align-top">
+                      <td className="py-1.5 font-bold break-all pr-1">{item.sku}</td>
+                      <td className="py-1.5 truncate max-w-[90px] pr-1 normal-case">{item.name}</td>
+                      <td className="py-1.5 text-center font-black text-slate-950">{item.qty} PCS</td>
+                      <td className="py-1.5 text-right font-bold text-blue-600">{item.locatorId}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              <div className="border-b border-dashed border-black my-3"></div>
+
+              <div className="grid grid-cols-2 text-center text-[10px] mt-4 pt-1 gap-4">
+                <div className="flex flex-col justify-between h-14">
+                  <p className="font-bold">PETUGAS GUDANG</p>
+                  <div className="border-t border-black w-full pt-1 truncate">{receiptPreview.operator}</div>
+                </div>
+                <div className="flex flex-col justify-between h-14">
+                  <p className="font-bold">ADMIN GUDANG</p>
+                  <div className="border-t border-black w-full pt-1">ADMIN</div>
+                </div>
+              </div>
+            </div>
           </div>
-          <div className="overflow-x-auto rounded-lg border border-slate-200">
-            <table className="w-full text-left border-collapse">
-              <thead className="bg-[#f8fafc] border-b border-slate-200">
-                <tr>
-                  <th className="px-6 py-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider">Time</th>
-                  <th className="px-6 py-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider">SKU</th>
-                  <th className="px-6 py-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider">Locator Allocation</th>
-                  <th className="px-6 py-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider">Total Qty</th>
-                  <th className="px-6 py-3.5 text-xs font-bold text-slate-500 uppercase tracking-wider">Action</th>
+        )}
+
+        {/* ANTREAN PENDING MANIFEST */}
+        {groupedPendingTransactions.length > 0 && (
+          <section className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
+            <div className="mb-4">
+              <h3 className="text-sm font-bold text-[#0055C4] uppercase tracking-wider flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-full bg-[#0055C4]"></span>
+                Riwayat Antrean Pending Manifest Outbound
+              </h3>
+            </div>
+            
+            <div className="overflow-x-auto rounded border border-slate-200">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold">
+                    <th className="p-2.5">Waktu Booking</th>
+                    <th className="p-2.5">Item SKU</th>
+                    <th className="p-2.5">Alokasi Pecahan Slot</th>
+                    <th className="p-2.5 text-center">Total Pick Qty</th>
+                    <th className="p-2.5">Operator</th>
+                    <th className="p-2.5 text-center">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {groupedPendingTransactions.map((group) => (
+                    <tr key={group.manifestId} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="p-2.5 whitespace-nowrap font-sans text-slate-500">
+                        {new Date(group.timestamp).toLocaleString('id-ID')}
+                      </td>
+                      <td className="p-2.5 font-mono font-bold text-blue-700">{group.sku}</td>
+                      <td className="p-2.5 font-mono text-slate-600">
+                        <div className="flex flex-wrap gap-1">
+                          {group.items.map((item, idx) => (
+                            <span key={idx} className="bg-slate-100 text-slate-700 text-[10px] px-1.5 py-0.5 rounded border border-slate-200 font-bold">
+                              {item.locatorId} ({Math.abs(item.qty)})
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                      <td className="p-2.5 text-center font-bold text-blue-700">{group.totalQty} PCS</td>
+                      <td className="p-2.5 text-slate-600 uppercase text-[11px]">{group.operator}</td>
+                      <td className="p-2.5 text-center">
+                        <button
+                          onClick={() => handleReviewPendingGroup(group)}
+                          className="inline-flex items-center gap-1 bg-blue-50 hover:bg-blue-100 text-[#0055C4] px-2.5 py-1 rounded text-[11px] font-semibold border border-blue-200 transition-colors mr-2"
+                        >
+                          Review Form
+                        </button>
+                        <button
+                          onClick={() => handlePreviewHistorical(group)}
+                          className="inline-flex items-center gap-1 bg-slate-800 text-white hover:bg-slate-900 px-2.5 py-1 rounded text-[11px] font-semibold transition-colors"
+                        >
+                          <Eye className="w-3 h-3" />
+                          Struk
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
+
+        {/* SEMUA RIWAYAT TRANSAKSI OUTBOUND (KONSOLIDASI SINGLE RECORD) */}
+        <section className="bg-white border border-slate-200 rounded-lg p-5 shadow-sm">
+          <div className="flex justify-between items-center mb-4">
+            <div>
+              <h3 className="text-sm font-bold text-[#0F294D] uppercase tracking-wider flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-[#0055C4]" />
+                Semua Riwayat Transaksi Outbound
+              </h3>
+              <p className="text-[11px] text-slate-500">Log mutasi item terperinci terkelompok per Manifes ID seperti di modul Inbound.</p>
+            </div>
+            <button 
+              onClick={refreshTransactionsData}
+              className="p-1 text-slate-400 hover:text-[#0055C4] transition-colors"
+            >
+              <RefreshCw className="w-4 h-4" />
+            </button>
+          </div>
+
+          <div className="overflow-x-auto rounded border border-slate-200">
+            <table className="w-full text-left border-collapse text-xs">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold">
+                  <th className="p-2.5">Waktu Transaksi</th>
+                  <th className="p-2.5">Manifest ID</th>
+                  <th className="p-2.5">SKU Material</th>
+                  <th className="p-2.5">Target Slot Rak</th>
+                  <th className="p-2.5 text-center">Total Kuantitas</th>
+                  <th className="p-2.5">Operator</th>
+                  <th className="p-2.5">Memo / PO</th>
+                  <th className="p-2.5 text-center">Status</th>
+                  <th className="p-2.5 text-center">Aksi</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 bg-white">
-                {groupedPendingTransactions.map(group => (
-                  <tr key={group.manifestId} className="hover:bg-slate-50/60 transition-colors">
-                    <td className="px-6 py-4 text-sm text-slate-600 font-mono">
-                      {new Date(group.timestamp).toLocaleString()}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-bold text-slate-900 font-mono">
-                      {group.sku}
-                    </td>
-                    <td className="px-6 py-4 text-sm font-mono text-slate-600">
-                      <div className="flex flex-wrap gap-1.5">
-                        {group.items.map((item, idx) => (
-                          <span key={idx} className="bg-slate-100 text-slate-700 text-xs px-2 py-0.5 rounded border border-slate-200 font-semibold">
-                            {item.locatorId} ({Math.abs(item.qty)})
-                          </span>
-                        ))}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm font-bold text-[#c2410c] font-mono">
-                      {group.totalQty}
-                    </td>
-                    <td className="px-6 py-4 text-sm">
-                      <button 
-                        onClick={() => handleReviewPendingGroup(group)}
-                        className="text-[#c2410c] font-bold hover:text-[#9a3412] hover:underline transition-colors text-sm"
-                      >
-                        Review & Confirm
-                      </button>
-                    </td>
+              <tbody className="divide-y divide-slate-100 text-slate-700">
+                {aggregatedHistoryTransactions.length === 0 ? (
+                  <tr>
+                    <td colSpan={9} className="text-center py-6 text-slate-400 italic text-[11px]">Belum ada riwayat rekaman mutasi transaksi keluar.</td>
                   </tr>
-                ))}
+                ) : (
+                  aggregatedHistoryTransactions.map((group) => (
+                    <tr key={group.manifestId} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-2.5 whitespace-nowrap text-slate-500 text-[11px]">
+                        {new Date(group.timestamp).toLocaleString('id-ID')}
+                      </td>
+                      <td className="p-2.5 font-mono text-slate-400 text-[10px] font-bold">{group.manifestId}</td>
+                      <td className="p-2.5 font-mono font-bold text-slate-900">{group.sku}</td>
+                      <td className="p-2.5 font-mono font-bold text-[#0055C4]">
+                        {group.locatorsList.sort().join(', ')}
+                      </td>
+                      <td className="p-2.5 text-center font-bold text-red-600">{group.totalQty} PCS</td>
+                      <td className="p-2.5 text-slate-600 uppercase text-[10px]">{group.operator}</td>
+                      <td className="p-2.5 text-slate-500 truncate max-w-[120px]">{group.memo}</td>
+                      <td className="p-2.5 text-center">
+                        <span className={`px-2 py-0.5 rounded-full font-bold text-[9px] ${
+                          group.status === 'CONFIRMED' 
+                            ? 'bg-emerald-100 text-emerald-800' 
+                            : group.status === 'BOOKED'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-red-100 text-red-800'
+                        }`}>
+                          {group.status}
+                        </span>
+                      </td>
+                      <td className="p-2.5 text-center">
+                        <button
+                          onClick={() => handlePreviewHistorical(group)}
+                          className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] px-2 py-1 rounded font-bold transition-colors"
+                        >
+                          Lihat Struk
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </section>
-      )}
+      </div>
 
-      {/* HIDDEN PRINT AREA - Dioptimalkan untuk Layout Kertas Nota Asli */}
-      <div id="print-area" className="printable-content">
-        <div className="invoice-box">
-          <div className="text-center mb-6 border-b-2 border-slate-800 pb-4">
-            <h2 className="text-2xl font-black uppercase tracking-widest text-slate-950">GUDANG PSN</h2>
-            <p className="font-mono text-xs font-bold mt-1 tracking-widest text-slate-700">PENGELUARAN BARANG (MANIFEST)</p>
+      {/* AREA PRINT NOTA STRUK */}
+      {receiptPreview && (
+        <div className="hidden print:block bg-white text-black p-0 font-mono text-[11px] leading-tight w-[76mm] mx-auto uppercase tracking-tight">
+          <div className="text-center">
+            <p className="font-bold border-b border-dashed border-black pb-1">
+              DOKUMEN VALID Ref: {receiptPreview.manifestId}
+            </p>
+            <p className="font-bold tracking-wide pt-1 text-xs">BARANG KELUAR (OUTBOUND)</p>
           </div>
-          
-          <table className="w-full text-left mb-6 font-mono text-xs border-collapse">
+          <div className="border-b border-dashed border-black my-2"></div>
+          <div className="space-y-1 text-left text-[10px]">
+            <p><span className="font-bold">WAKTU VALIDASI SUKSES:</span> <span className="font-sans normal-case">{receiptPreview.date}</span></p>
+            <p><span className="font-bold">OPERATOR GUDANG:</span> {receiptPreview.operator}</p>
+            <p><span className="font-bold">MEMO / REFERENSI:</span> <span className="normal-case">{receiptPreview.memo}</span></p>
+          </div>
+          <div className="border-b border-dashed border-black my-2"></div>
+          <p className="font-bold text-left text-[10px] mb-1.5">DAFTAR HASIL DISTRIBUSI MULTI-RAK (PICKING ALOKASI):</p>
+          <table className="w-full text-left border-collapse text-[10px]">
             <thead>
-              <tr className="border-b-2 border-slate-800 text-slate-950">
-                <th className="py-2 font-bold">SKU</th>
-                <th className="py-2 font-bold">RACK</th>
-                <th className="py-2 font-bold">LOCATOR</th>
-                <th className="py-2 font-bold text-right">QTY</th>
-                <th className="py-2 font-bold pl-4">MEMO</th>
+              <tr className="border-b border-black align-bottom">
+                <th className="py-1 font-bold w-[30%]">ITEM SKU</th>
+                <th className="py-1 font-bold w-[35%]">NAMA PRODUK</th>
+                <th className="py-1 font-bold text-center w-[15%]">QTY</th>
+                <th className="py-1 font-bold text-right w-[20%]">SLOT</th>
               </tr>
             </thead>
-            <tbody>
-              {bookedTransactions.map(tx => {
-                const locInfo = locators.find(l => l.id === tx.locatorId);
-                return (
-                  <tr key={tx.id} className="border-b border-slate-300 border-dashed text-slate-900">
-                    <td className="py-2.5 font-bold">{tx.sku}</td>
-                    <td className="py-2.5">{locInfo ? locInfo.rack : '-'}</td>
-                    <td className="py-2.5">{tx.locatorId}</td>
-                    <td className="py-2.5 text-right font-black">{Math.abs(tx.qty)}</td>
-                    <td className="py-2.5 pl-4 text-slate-600">{tx.memo || '-'}</td>
-                  </tr>
-                );
-              })}
+            <tbody className="divide-y divide-dashed divide-gray-400">
+              {receiptPreview.rows.map((item, idx) => (
+                <tr key={idx} className="align-top">
+                  <td className="py-1.5 font-bold break-all pr-1">{item.sku}</td>
+                  <td className="py-1.5 truncate max-w-[80px] pr-1 normal-case">{item.name}</td>
+                  <td className="py-1.5 text-center font-bold">{item.qty}</td>
+                  <td className="py-1.5 text-right font-bold break-all">{item.locatorId}</td>
+                </tr>
+              ))}
             </tbody>
           </table>
-
-          <div className="mt-12 flex justify-between px-8">
-            <div className="text-center">
-              <div className="h-16 border-b border-slate-400 w-32 mx-auto"></div>
-              <p className="font-bold text-xs mt-2 uppercase text-slate-700 tracking-wide">Operator</p>
+          <div className="border-b border-dashed border-black my-3"></div>
+          <div className="grid grid-cols-2 text-center text-[10px] mt-4 pt-1 gap-4 page-break-inside-avoid">
+            <div className="flex flex-col justify-between h-14">
+              <p className="font-bold">PETUGAS GUDANG</p>
+              <div className="border-t border-black w-full pt-1 truncate">{receiptPreview.operator}</div>
             </div>
-            <div className="text-center">
-              <div className="h-16 border-b border-slate-400 w-32 mx-auto"></div>
-              <p className="font-bold text-xs mt-2 uppercase text-slate-700 tracking-wide">Admin Gudang</p>
+            <div className="flex flex-col justify-between h-14">
+              <p className="font-bold">ADMIN GUDANG</p>
+              <div className="border-t border-black w-full pt-1">ADMIN</div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       <style dangerouslySetInnerHTML={{__html: `
-        /* Default view: Sembunyikan area cetak khusus */
-        #print-area {
-          display: none;
-        }
-
         @media print {
-          /* Menyembunyikan seluruh elemen utama aplikasi */
-          body * {
-            visibility: hidden;
-          }
-          /* Hanya tampilkan kontainer print-area beserta seluruh turunannya */
-          #print-area, #print-area * {
-            visibility: visible !important;
-          }
-          #print-area {
-            display: block !important;
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            background: white !important;
-            color: black !important;
-          }
-          .invoice-box {
-            padding: 30px;
-            background: white;
-          }
-          /* Mencegah pecahnya baris tabel saat berganti halaman cetak */
-          tr {
-            page-break-inside: avoid;
-          }
-        }
-        
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: rgba(255, 255, 255, 0.05);
-          border-radius: 4px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background: rgba(255, 255, 255, 0.2);
-          border-radius: 4px;
+          body * { visibility: hidden; }
+          .print\\:block, .print\\:block * { visibility: visible !important; }
+          .print\\:block { display: block !important; position: absolute; left: 0; top: 0; width: 100%; }
         }
       `}} />
+
     </div>
   );
 }
