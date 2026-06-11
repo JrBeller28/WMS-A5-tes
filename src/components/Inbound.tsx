@@ -408,7 +408,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
   const levels = Array.from({length: maxLevel}, (_, i) => maxLevel - i);
 
   return (
-    <div className="space-y-6 max-w-[1200px] mx-auto p-4">
+    <div className="space-y-6 max-w-full mx-auto p-4">
       
       {/* 1. INTERFACES UTAMA */}
       <div className="print:hidden space-y-6">

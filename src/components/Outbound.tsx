@@ -425,7 +425,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
   };
 
   return (
-    <div className="space-y-6 max-w-[1200px] mx-auto p-4">
+    <div className="space-y-6 max-w-full mx-auto p-4">
       
       <div className="print:hidden space-y-6">
         <div className="flex flex-col sm:flex-row justify-between items-start gap-3">
