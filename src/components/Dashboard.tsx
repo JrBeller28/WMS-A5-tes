@@ -1,15 +1,37 @@
 import React, { useEffect, useState } from 'react';
 import { Activity, Box, LogIn, LogOut, AlertTriangle, RefreshCw } from 'lucide-react';
 import { WarehouseVisualizer } from './WarehouseVisualizer';
-import { getInventoryStats } from '../lib/db';
+import { getInventoryStats, getTransactions } from '../lib/db';
 
 export function Dashboard() {
   const [stats, setStats] = useState<any>(null);
+  const [inboundVolume, setInboundVolume] = useState<number>(0);
+  const [pendingOutboundCount, setPendingOutboundCount] = useState<number>(0);
 
-  const fetchStats = () => {
-    getInventoryStats()
-      .then(setStats)
-      .catch(console.error);
+  const fetchStats = async () => {
+    try {
+      // 1. Ambil data statistik dasar cetakan sistem
+      const inventoryStats = await getInventoryStats();
+      setStats(inventoryStats);
+
+      // 2. Ambil seluruh data transaksi untuk kalkulasi volume & status pending
+      const txs = await getTransactions();
+
+      // Hitung akumulasi volume kuantitas untuk Inbound yang tidak batal
+      const totalInboundVol = txs
+        .filter((tx: any) => tx.type === 'INBOUND' && tx.status !== 'CANCELLED')
+        .reduce((sum: number, tx: any) => sum + Math.abs(tx.qty || 0), 0);
+      
+      // Hitung total jumlah baris transaksi Outbound yang masih PENDING atau BOOKED
+      const totalPendingOutbound = txs
+        .filter((tx: any) => tx.type === 'OUTBOUND' && (tx.status === 'PENDING' || tx.status === 'BOOKED'))
+        .length;
+
+      setInboundVolume(totalInboundVol);
+      setPendingOutboundCount(totalPendingOutbound);
+    } catch (error) {
+      console.error("Error fetching dashboard statistics:", error);
+    }
   };
 
   useEffect(() => {
@@ -34,6 +56,7 @@ export function Dashboard() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        {/* Total Occupancy Card */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex justify-between items-start mb-4">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Occupancy</p>
@@ -48,24 +71,27 @@ export function Dashboard() {
           </div>
         </div>
 
+        {/* Active Inbound Volume Card */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex justify-between items-start mb-4">
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Active Inbound</p>
+            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Active Inbound Volume</p>
             <LogIn className="w-5 h-5 text-emerald-600" />
           </div>
-          <p className="text-3xl font-bold text-slate-800">{stats?.inbound || 0}</p>
-          <p className="text-sm text-slate-500 mt-1">4 arriving in &lt; 2 hrs</p>
+          <p className="text-3xl font-bold text-slate-800">{inboundVolume.toLocaleString()}</p>
+          <p className="text-sm text-slate-500 mt-1">Total item quantity loaded</p>
         </div>
 
+        {/* Pending Outbound Transactions Card */}
         <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
           <div className="flex justify-between items-start mb-4">
             <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pending Outbound</p>
             <LogOut className="w-5 h-5 text-blue-600" />
           </div>
-          <p className="text-3xl font-bold text-slate-800">{stats?.outbound || 0}</p>
-          <p className="text-sm text-slate-500 mt-1">8 priority orders pending</p>
+          <p className="text-3xl font-bold text-slate-800">{pendingOutboundCount}</p>
+          <p className="text-sm text-slate-500 mt-1">Active manifest queues pending</p>
         </div>
 
+        {/* Stock Alerts Card */}
         <div className="bg-white p-5 rounded-xl border border-red-200 ring-1 ring-red-100 shadow-sm">
           <div className="flex justify-between items-start mb-4">
             <p className="text-xs font-bold text-red-600 uppercase tracking-wider">Stock Alerts</p>
