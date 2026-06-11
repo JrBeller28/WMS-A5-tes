@@ -1,16 +1,22 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, Shield, CheckCircle2, AlertCircle, Zap } from 'lucide-react';
+import { Camera, Shield, CheckCircle2, AlertCircle, Zap, Trash2, Printer } from 'lucide-react';
 import { Product, Locator, Transaction } from '../types';
 import { getProducts, getPutawayRecommendations, addTransaction, getTransactions, getInventoryDetails, getLocators } from '../lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentUser } from '../lib/auth';
 
+// Interface untuk menampung alokasi sementara dari grid sebelum di-stage
+interface TempAllocation {
+  locatorId: string;
+  qty: number;
+  volume: number;
+}
+
 export function Inbound() {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedSku, setSelectedSku] = useState('');
-  const [qty, setQty] = useState('');
+  const [totalQty, setTotalQty] = useState(''); // Total Qty yang datang di dermaga
   const [recommendations, setRecommendations] = useState<Locator[]>([]);
-  const [selectedLocator, setSelectedLocator] = useState('');
   const [message, setMessage] = useState<{type: 'success'|'error', text: string} | null>(null);
   const [loading, setLoading] = useState(false);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -18,6 +24,13 @@ export function Inbound() {
   
   const [locators, setLocators] = useState<Locator[]>([]);
   const [inventory, setInventory] = useState<any>({});
+  
+  // State baru untuk menampung multi-rak yang dipilih dari grid beserta kuantitas pecahannya
+  const [tempAllocations, setTempAllocations] = useState<TempAllocation[]>([]);
+
+  // State arsip dokumen cetak manifes
+  const [lastPrintedBatch, setLastPrintedBatch] = useState<any[] | null>(null);
+  const [printDate, setPrintDate] = useState<string>('');
 
   useEffect(() => {
     Promise.all([
@@ -44,28 +57,28 @@ export function Inbound() {
 
   const productDetails = products.find(p => p.sku === selectedSku);
 
-  // 1. FILTER: Hanya ambil locators yang sesuai dengan kategori produk (jika SKU sudah dipilih)
   const compatibleLocators = locators.filter(l => {
     if (!productDetails?.category) return true;
     return l.zone === productDetails.category;
   });
 
+  // Bersihkan alokasi sementara jika SKU atau Total Qty berubah
+  useEffect(() => {
+    setTempAllocations([]);
+  }, [selectedSku, totalQty]);
+
+  // Hitung sisa kuantitas barang masuk yang belum mendapatkan alokasi rak
+  const unallocatedQty = Math.max(0, Number(totalQty || 0) - tempAllocations.reduce((sum, item) => sum + item.qty, 0));
+
   const handleRecommend = async () => {
-    if (!selectedSku || !qty) return;
+    if (!selectedSku || unallocatedQty <= 0) return;
     setLoading(true);
     try {
-      const recs = await getPutawayRecommendations(selectedSku, Number(qty));
-      // Filter rekomendasi berdasarkan kategori juga
+      const recs = await getPutawayRecommendations(selectedSku, unallocatedQty);
       const filteredRecs = recs.filter(r => !productDetails?.category || r.zone === productDetails.category);
       setRecommendations(filteredRecs);
-      
-      if (filteredRecs.length > 0) {
-        setSelectedLocator(filteredRecs[0].id);
-      } else {
-        setMessage({ type: 'error', text: 'No suitable locators found for this category.' });
-      }
     } catch (e: any) {
-      setMessage({ type: 'error', text: e.message || 'Error fetching recommendations' });
+      console.error(e);
     }
     setLoading(false);
   };
@@ -73,15 +86,16 @@ export function Inbound() {
   useEffect(() => {
     const timer = setTimeout(() => {
       handleRecommend();
-    }, 500);
+    }, 350);
     return () => clearTimeout(timer);
-  }, [selectedSku, qty]);
+  }, [selectedSku, totalQty, tempAllocations]);
 
+  // Fungsi utilitas kalkulasi kapasitas ruang slot rak
   const getSlotStat = (locId: string) => {
     let usedVol = 0;
     const items: any[] = [];
     
-    // Hitung inventory yang sudah ada
+    // 1. Hitung okupansi eksisting di database gudang
     Object.entries(inventory).forEach(([sku, data]: [string, any]) => {
       const pData = products.find(p => p.sku === sku);
       const locQty = data.locators[locId]?.physicalQty || 0;
@@ -91,7 +105,7 @@ export function Inbound() {
       }
     });
     
-    // Tambahkan list pending dari keranjang inbound
+    // 2. Hitung akumulasi dari list staging yang siap konfirmasi
     inboundList.filter(i => i.locatorId === locId).forEach(pendingItem => {
       const pData = products.find(p => p.sku === pendingItem.sku);
       if (pData) usedVol += pendingItem.qty * pData.volumeM3;
@@ -100,89 +114,150 @@ export function Inbound() {
       else items.push({ sku: pendingItem.sku, qty: pendingItem.qty });
     });
 
-    // Simulasi penambahan volume untuk slot yang sedang di-select di form saat ini
-    if (locId === selectedLocator && productDetails && Number(qty) > 0) {
-       usedVol += Number(qty) * productDetails.volumeM3;
-       const existing = items.find(i => i.sku === selectedSku);
-       if (existing) existing.qty += Number(qty);
-       else items.push({ sku: selectedSku, qty: Number(qty) });
+    // 3. Hitung penambahan dari multi-selection grid aktif saat ini
+    const activeTemp = tempAllocations.find(t => t.locatorId === locId);
+    if (activeTemp && productDetails) {
+      usedVol += activeTemp.qty * productDetails.volumeM3;
+      const existing = items.find(i => i.sku === selectedSku);
+      if (existing) existing.qty += activeTemp.qty;
+      else items.push({ sku: selectedSku, qty: activeTemp.qty });
     }
     
     const maxVol = locators.find(r => r.id === locId)?.maxVolumeM3 || 5.4;
     const pct = Math.min(100, Math.round((usedVol / maxVol) * 100));
-    return { usedVol, maxVol, pct, items };
+    return { usedVol, maxVol, pct, items, allocatedQty: activeTemp?.qty || 0 };
   };
 
-  const handleAddToList = () => {
-    if (!selectedSku || !qty || !selectedLocator) {
-      setMessage({ type: 'error', text: 'Please complete all fields' });
+  // Fungsi untuk menangani klik multi-rak pada grid visual matrix
+  const handleSlotGridClick = (locId: string) => {
+    if (!selectedSku) {
+      setMessage({ type: 'error', text: 'Tentukan SKU barang terlebih dahulu.' });
+      return;
+    }
+    if (!totalQty || Number(totalQty) <= 0) {
+      setMessage({ type: 'error', text: 'Masukkan kuantitas total material masuk.' });
       return;
     }
 
-    // 2. VALIDASI: Cek apakah penambahan ini melampaui kapasitas rak
-    const stat = getSlotStat(selectedLocator);
-    if (stat.usedVol > stat.maxVol) {
-      // Hitung sisa ruang secara akurat tanpa memasukkan qty inputan saat ini
-      const projectedOverfill = stat.usedVol - stat.maxVol;
-      const availableVol = (Number(qty) * (productDetails?.volumeM3 || 1)) - projectedOverfill;
-      const maxQtyAllowed = Math.floor(availableVol / (productDetails?.volumeM3 || 1));
-      
-      setMessage({ 
-        type: 'error', 
-        text: `Volume exceeds Rack capacity! Max allowed for this slot is ${maxQtyAllowed} units.` 
-      });
+    // Jika slot sudah terpilih sebelumnya, hapus dari alokasi multi-rak
+    if (tempAllocations.some(t => t.locatorId === locId)) {
+      setTempAllocations(tempAllocations.filter(t => t.locatorId !== locId));
       return;
     }
 
-    setInboundList([...inboundList, {
+    if (unallocatedQty <= 0) {
+      setMessage({ type: 'error', text: 'Seluruh kuantitas barang sudah habis teralokasi ke rak.' });
+      return;
+    }
+
+    const unitVolume = productDetails?.volumeM3 || 0.1;
+    const stat = getSlotStat(locId);
+    
+    // Hitung sisa ruang m3 tersedia di rak target
+    const availableVol = Math.max(0, stat.maxVol - stat.usedVol);
+    if (availableVol <= 0) {
+      setMessage({ type: 'error', text: `Slot Rak ${locId} sudah terisi penuh!` });
+      return;
+    }
+
+    // Kalkulasi batas maksimal kapasitas unit barang di slot rak tersebut
+    const maxQtyForThisSlot = Math.floor(availableVol / unitVolume);
+    if (maxQtyForThisSlot <= 0) {
+      setMessage({ type: 'error', text: `Sisa volume di Slot ${locId} tidak cukup untuk ukuran 1 unit SKU ini.` });
+      return;
+    }
+
+    // Ambil kuantitas optimal (potong kuantitas sisa atau penuhi batas maksimal rak)
+    const allocatedQty = Math.min(unallocatedQty, maxQtyForThisSlot);
+
+    setTempAllocations([...tempAllocations, {
+      locatorId: locId,
+      qty: allocatedQty,
+      volume: allocatedQty * unitVolume
+    }]);
+    setMessage(null);
+  };
+
+  const handleAddBatchToList = () => {
+    if (tempAllocations.length === 0) {
+      setMessage({ type: 'error', text: 'Pilih minimal 1 atau beberapa rak pada grid matrix.' });
+      return;
+    }
+
+    // Pindahkan semua alokasi pecahan multi-rak ke bag staging queue
+    const newStagingItems = tempAllocations.map(alloc => ({
       id: uuidv4(),
       sku: selectedSku,
-      qty: Math.abs(Number(qty)),
-      locatorId: selectedLocator
-    }]);
+      qty: alloc.qty,
+      locatorId: alloc.locatorId,
+      name: productDetails?.name || 'Unknown Product',
+      volume: alloc.volume
+    }));
+
+    setInboundList([...inboundList, ...newStagingItems]);
     
-    // 3. SPLIT PUTAWAY: Kosongkan qty dan locator, tapi BIARKAN SKU tetap terpilih
-    setQty('');
-    setSelectedLocator('');
-    setRecommendations([]);
-    setMessage({ type: 'success', text: 'Added to list. Select next rack for remaining items if needed.' });
+    // Bersihkan state input untuk load barang berikutnya
+    setTotalQty('');
+    setSelectedSku('');
+    setTempAllocations([]);
+    setMessage({ type: 'success', text: 'Grup multi-rak berhasil didaftarkan ke antrean.' });
     setTimeout(() => setMessage(null), 3000);
+  };
+
+  const handleRemoveItem = (id: string) => {
+    setInboundList(inboundList.filter(item => item.id !== id));
   };
 
   const handleConfirmAll = async () => {
     if (inboundList.length === 0) return;
     try {
       const user = getCurrentUser();
-      for (const item of inboundList) {
+      const operatorName = user ? user.name : 'Warehouse Operator';
+      const currentTime = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
+      
+      const preparedBatch = inboundList.map(item => ({
+        ...item,
+        operator: operatorName,
+        timestamp: currentTime
+      }));
+
+      for (const item of preparedBatch) {
         const tx = {
            id: item.id,
            type: 'INBOUND' as const,
            sku: item.sku,
            qty: item.qty,
            locatorId: item.locatorId,
-           operator: user ? user.name : 'Unknown User',
+           operator: item.operator,
            timestamp: new Date().toISOString(),
            status: 'CONFIRMED' as const
         };
         await addTransaction(tx);
       }
-      setMessage({ type: 'success', text: 'Batch putaway complete!' });
+
+      setLastPrintedBatch(preparedBatch);
+      setPrintDate(currentTime);
+      
+      setMessage({ type: 'success', text: 'Konfirmasi putaway berhasil! Menyiapkan cetak berkas...' });
       setInboundList([]);
-      setSelectedSku(''); // Reset SKU setelah batch selesai
       fetchTransactions();
-      setTimeout(() => setMessage(null), 3000);
+      
+      setTimeout(() => {
+        window.print();
+        setMessage(null);
+      }, 800);
+
     } catch (e) {
-      setMessage({ type: 'error', text: 'Network error during batch' });
+      setMessage({ type: 'error', text: 'Gagal memproses transaksi jaringan.' });
     }
   };
 
-  const recommendedLoc = recommendations.find(r => r.id === selectedLocator) || recommendations[0];
+  const recommendedLoc = recommendations[0];
 
-  // Visual grid menggunakan locators yang sudah difilter kategori
   let rack = 'FL-A';
-  const selectedLocData = compatibleLocators.find(l => l.id === selectedLocator);
-  if (selectedLocData) {
-    rack = selectedLocData.rack;
+  if (tempAllocations.length > 0) {
+    const lastSelected = compatibleLocators.find(l => l.id === tempAllocations[tempAllocations.length - 1].locatorId);
+    if (lastSelected) rack = lastSelected.rack;
   } else if (recommendedLoc) {
     rack = recommendedLoc.rack;
   } else if (compatibleLocators.length > 0) {
@@ -194,340 +269,344 @@ export function Inbound() {
   const maxLevel = rack.startsWith('FL') ? 2 : (rackLocators.length > 0 ? Math.max(...rackLocators.map(l => l.level)) : 4);
   const levels = Array.from({length: maxLevel}, (_, i) => maxLevel - i);
 
-  const getUtilColor = (pct: number) => {
-    if (pct >= 95) return 'bg-rose-500';
-    if (pct >= 70) return 'bg-amber-400';
-    return 'bg-emerald-400';
-  };
-
   return (
     <div className="space-y-6 max-w-[1200px] mx-auto">
-      <div className="flex justify-between items-start">
-        <div>
-          <h2 className="text-3xl font-bold text-[#0F294D] tracking-tight">Directed Putaway</h2>
-          <p className="text-slate-500 mt-1 text-sm font-medium">Optimize storage efficiency with real-time slot recommendations.</p>
+      {/* AREA SCREEN ONLY */}
+      <div className="print:hidden space-y-6">
+        <div className="flex justify-between items-start">
+          <div>
+            <h2 className="text-3xl font-bold text-[#0F294D] tracking-tight">Directed Putaway</h2>
+            <p className="text-slate-500 mt-1 text-sm font-medium">Multi-rack routing interface. Klik beberapa rak untuk memecah kuantitas barang volume besar.</p>
+          </div>
+          <div className="bg-[#009254] text-white px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 shadow-sm">
+            <Zap className="w-4 h-4 fill-white" />
+            Multi-Slot Allocation Active
+          </div>
         </div>
-        <div className="bg-[#009254] text-white px-4 py-2 rounded-md font-bold text-sm flex items-center gap-2 shadow-sm">
-          <Zap className="w-4 h-4 fill-white" />
-          System Active: Auto-optimization ON
-        </div>
-      </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Form Section */}
-        <section className="col-span-12 lg:col-span-4 bg-white border border-slate-200 rounded-lg p-6 shadow-sm flex flex-col">
-          <h3 className="text-lg font-bold mb-6 flex items-center gap-2 text-[#24549A]">
-            <span className="w-5 h-5 flex items-center gap-0.5">
-              <span className="w-1.5 h-full bg-[#24549A] inline-block rounded-sm"></span>
-              <span className="w-1.5 h-3/4 bg-[#24549A] inline-block rounded-sm"></span>
-            </span>
-            Register Stock
-          </h3>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Form Entry */}
+          <section className="col-span-12 lg:col-span-4 bg-white border border-slate-200 rounded-lg p-6 shadow-sm flex flex-col">
+            <h3 className="text-lg font-bold mb-6 flex items-center gap-2 text-[#24549A]">
+              <span className="w-5 h-5 flex items-center gap-0.5">
+                <span className="w-1.5 h-full bg-[#24549A] inline-block rounded-sm"></span>
+                <span className="w-1.5 h-3/4 bg-[#24549A] inline-block rounded-sm"></span>
+              </span>
+              Batch Receipt Entry
+            </h3>
 
-          <div className="space-y-5 flex-1">
-            <div>
-              <label className="block text-sm text-[#475569] mb-1.5 font-medium">SKU Identifier</label>
-              <div className="relative">
+            <div className="space-y-5 flex-1">
+              <div>
+                <label className="block text-sm text-[#475569] mb-1.5 font-medium">SKU Barang</label>
                 <select 
                   value={selectedSku} 
-                  onChange={e => {
-                    setSelectedSku(e.target.value);
-                    setQty('');
-                    setSelectedLocator('');
-                  }}
-                  className="w-full p-2.5 border border-slate-300 rounded text-sm text-slate-800 bg-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none appearance-none"
+                  onChange={e => setSelectedSku(e.target.value)}
+                  className="w-full p-2.5 border border-slate-300 rounded text-sm text-slate-800 bg-white focus:ring-1 focus:ring-blue-500 outline-none"
                 >
-                  <option value="">Scan or Select SKU</option>
+                  <option value="">-- Pilih SKU Material --</option>
                   {products.map(p => (
                     <option key={p.sku} value={p.sku}>{p.sku} - {p.name}</option>
                   ))}
                 </select>
-                <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-                  <Camera className="w-5 h-5 text-blue-600" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-[#475569] mb-1.5 font-medium">Total Qty Datang</label>
+                  <input 
+                    type="number" 
+                    value={totalQty}
+                    onChange={e => setTotalQty(e.target.value)}
+                    placeholder="Contoh: 150"
+                    className="w-full p-2.5 border border-slate-300 rounded text-sm text-slate-800 focus:ring-1 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                   <label className="block text-sm text-[#475569] mb-1.5 font-medium">Total Vol (m³)</label>
+                  <input 
+                    type="text" 
+                    value={productDetails && totalQty ? (productDetails.volumeM3 * Number(totalQty)).toFixed(2) : '0.00'}
+                    readOnly
+                    className="w-full p-2.5 border border-slate-300 rounded text-sm text-slate-800 bg-slate-50 outline-none font-mono"
+                  />
                 </div>
               </div>
+
+              {/* Pemecahan Angka Alokasi Real-time */}
+              {Number(totalQty) > 0 && (
+                <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-xs space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Belum Terpilih:</span>
+                    <span className={`font-bold ${unallocatedQty > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{unallocatedQty} PCS</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Sudah Terbagi (Multi-Rak):</span>
+                    <span className="font-bold text-blue-600">{tempAllocations.reduce((sum, i) => sum + i.qty, 0)} PCS</span>
+                  </div>
+                </div>
+              )}
+              
+              {tempAllocations.length > 0 && (
+                <div className="bg-blue-50/50 border border-blue-200 rounded p-3">
+                  <p className="text-xs font-bold text-blue-800 mb-1.5">Rencana Pemecahan Rak Terpilih:</p>
+                  <div className="space-y-1 max-h-24 overflow-y-auto">
+                    {tempAllocations.map(t => (
+                      <div key={t.locatorId} className="text-[11px] flex justify-between font-mono text-slate-700 bg-white p-1 px-2 rounded border border-slate-100">
+                        <span>Slot {t.locatorId}</span>
+                        <span className="font-bold">{t.qty} PCS ({t.volume.toFixed(2)} m³)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {message && (
+                <div className={`p-3 rounded text-xs font-bold ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700 flex items-start gap-2'}`}>
+                  {message.type === 'error' && <AlertCircle className="w-4 h-4 shrink-0" />}
+                  {message.text}
+                </div>
+              )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-[#475569] mb-1.5 font-medium">Qty for this Rack</label>
-                <input 
-                  type="number" 
-                  value={qty}
-                  onChange={e => setQty(e.target.value)}
-                  placeholder="e.g. 50"
-                  className="w-full p-2.5 border border-slate-300 rounded text-sm text-slate-800 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                 <label className="block text-sm text-[#475569] mb-1.5 font-medium">Est. Volume (m³)</label>
-                <input 
-                  type="text" 
-                  value={productDetails && qty ? (productDetails.volumeM3 * Number(qty)).toFixed(2) : ''}
-                  readOnly
-                  className="w-full p-2.5 border border-slate-300 rounded text-sm text-slate-800 bg-slate-50 outline-none"
-                />
-              </div>
+            <div className="pt-4 mt-auto border-t border-slate-100">
+              <button 
+                onClick={handleAddBatchToList}
+                disabled={tempAllocations.length === 0}
+                className="w-full bg-[#34d399] font-bold text-slate-900 py-3 rounded text-sm flex items-center justify-center gap-2 hover:bg-[#10b981] transition-colors disabled:opacity-40"
+              >
+                <Shield className="w-4 h-4" />
+                Stage Selected Racks ({tempAllocations.length})
+              </button>
+
+              {inboundList.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-slate-200">
+                  <div className="flex justify-between items-center mb-2">
+                    <h4 className="text-xs font-black text-slate-700 uppercase">Staging Queue Plan:</h4>
+                    <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] font-bold rounded">{inboundList.length} Racks</span>
+                  </div>
+                  <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                    {inboundList.map(item => (
+                      <div key={item.id} className="text-xs flex justify-between bg-white p-2 rounded border border-slate-200 items-center">
+                        <div>
+                          <p className="font-bold text-blue-700 font-mono">{item.sku}</p>
+                          <p className="text-[10px] text-slate-400">Allocated: <span className="text-slate-800 font-bold">{item.qty} PCS</span> ➔ Slot {item.locatorId}</p>
+                        </div>
+                        <button onClick={() => handleRemoveItem(item.id)} className="text-slate-400 hover:text-rose-600 p-1">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button 
+                    onClick={handleConfirmAll}
+                    className="w-full mt-3 bg-[#0055C4] font-bold text-white py-3 rounded text-sm flex items-center justify-center gap-2 hover:bg-blue-800 transition-colors"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    Confirm All Putaways & Print
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* Matrix Board */}
+          <section className="col-span-12 lg:col-span-8 flex flex-col gap-4">
+            <div className="bg-[#0b5cd5] text-white rounded-lg p-5 shadow-sm">
+               <span className="inline-block px-2.5 py-0.5 bg-white/20 text-white text-[9px] font-extrabold tracking-wider rounded-full mb-1.5 uppercase">AI Suggestion Path</span>
+               <h3 className="text-xl font-light">Rekomendasi Utama Slot Kosong: <span className="font-mono font-bold underline">{recommendedLoc?.id || '---'}</span></h3>
+               <p className="text-xs text-white/70 mt-1">Sistem mendeteksi sisa beban volume optimal gudang berdasarkan matriks kecepatan produk.</p>
             </div>
 
-            <div>
-              <label className="block text-sm text-[#475569] mb-1.5 font-medium">Handling Category</label>
-              <select disabled className="w-full p-2.5 border border-slate-300 rounded text-sm text-slate-500 bg-slate-50 outline-none">
-                <option>{productDetails?.category ? productDetails.category.replace('_', ' ') : 'Standard'}</option>
-              </select>
-            </div>
-            
-            {message && (
-              <div className={`p-3 rounded text-xs font-bold ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700 flex items-start gap-2'}`}>
-                {message.type === 'error' && <AlertCircle className="w-4 h-4 shrink-0" />}
-                {message.text}
-              </div>
-            )}
-          </div>
-
-          <div className="pt-6 mt-auto">
-            <button 
-              onClick={handleAddToList}
-              disabled={!selectedSku || !qty || !selectedLocator}
-              className="w-full bg-[#34d399] font-bold text-slate-900 py-3 rounded text-sm flex items-center justify-center gap-2 hover:bg-[#10b981] transition-colors disabled:opacity-50"
-            >
-              <Shield className="w-4 h-4" />
-              Add to Putaway List
-            </button>
-
-            {inboundList.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-slate-100">
-                <h4 className="text-xs font-bold text-slate-800 mb-2">Pending Putaway:</h4>
-                <ul className="space-y-2 mb-4">
-                  {inboundList.map(item => (
-                    <li key={item.id} className="text-xs flex justify-between bg-slate-50 p-2 rounded border border-slate-200">
-                      <span className="font-bold text-blue-600">{item.sku}</span>
-                      <span>{item.qty} units ➔ {item.locatorId}</span>
-                    </li>
-                  ))}
-                </ul>
-                <button 
-                  onClick={handleConfirmAll}
-                  className="w-full bg-[#0055C4] font-bold text-white py-3 rounded text-sm flex items-center justify-center gap-2 hover:bg-blue-800 transition-colors"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  Confirm All Putaways
-                </button>
-              </div>
-            )}
-            
-            <p className="text-center text-[11px] font-bold text-slate-500 mt-3">
-              This action will be recorded to the <span className="text-[#0055C4] cursor-pointer">Immutable Ledger</span>.
-            </p>
-          </div>
-        </section>
-
-        {/* Right Section (AI + Visualization) */}
-        <section className="col-span-12 lg:col-span-8 flex flex-col gap-4">
-          
-          {/* AI Recommendation Panel */}
-          <div className="bg-[#0b5cd5] text-white rounded-lg p-6 shadow-sm relative overflow-hidden">
-             <div className="absolute right-0 top-0 bottom-0 w-1/3 bg-gradient-to-l from-white/10 to-transparent pointer-events-none"></div>
-             
-             <div className="flex justify-between items-start mb-6">
-                <div>
-                  <span className="inline-block px-3 py-1 bg-white/20 text-white text-[10px] font-bold tracking-wider rounded-full mb-3 uppercase">AI Recommendation</span>
-                  <h3 className="text-3xl font-light">Recommended Slot: <span className="font-bold underline decoration-2 underline-offset-4">{recommendedLoc?.id || '---'}</span></h3>
-                  
-                  <div className="flex gap-8 mt-4">
-                    <div className="flex items-center gap-2">
-                       <div className="w-1 h-3 border border-white/40 border-r-0 border-t-0"></div>
-                       <span className="text-sm font-medium text-white/90">{recommendedLoc?.zone.replace('_', ' ') || 'Zone'}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                       <div className="w-3 h-3 rounded-sm border border-white/40 flex items-center justify-center"><div className="w-1 h-1 bg-white/40 rounded-full"></div></div>
-                       <span className="text-sm font-medium text-white/90">Current Load: {recommendedLoc ? getSlotStat(recommendedLoc.id).usedVol.toFixed(2) : '0.00'} m³ / {recommendedLoc ? getSlotStat(recommendedLoc.id).maxVol.toFixed(1) : '5.4'} m³</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-white/10 border border-white/20 p-4 rounded backdrop-blur-sm min-w-[140px]">
-                  <p className="text-[10px] font-bold text-white/80 uppercase tracking-widest mb-1">Distance from Dock</p>
-                  <p className="text-2xl font-black">{recommendedLoc ? String((Math.random() * 20 + 5).toFixed(1)) : '--'} meters</p>
-                </div>
-             </div>
-
-             <div className="grid grid-cols-3 gap-6 pt-4 border-t border-white/10">
-                <div>
-                  <div className="flex justify-between text-xs font-semibold text-white/80 mb-1.5 uppercase tracking-wider"><span>Zone Matching</span></div>
-                  <div className="h-1.5 bg-white/20 rounded-full overflow-hidden flex">
-                     <div className="h-full bg-[#10b981] w-full"></div>
-                  </div>
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs font-semibold text-white/80 mb-1.5 uppercase tracking-wider"><span>Load Capacity</span></div>
-                  <div className="h-1.5 bg-white/20 rounded-full overflow-hidden flex">
-                     <div className="h-full bg-[#3b82f6] relative transition-all duration-500" style={{ width: `${recommendedLoc ? getSlotStat(recommendedLoc.id).pct : 0}%` }}>
-                        <div className="absolute right-0 top-0 bottom-0 w-4 bg-white/50"></div>
-                     </div>
-                  </div>
-                  <p className="text-[9px] text-white/60 mt-1 uppercase">{recommendedLoc ? getSlotStat(recommendedLoc.id).usedVol.toFixed(2) : '0.00'} / {recommendedLoc ? getSlotStat(recommendedLoc.id).maxVol.toFixed(1) : '5.4'} m³ (Utilized)</p>
-                </div>
-                <div>
-                  <div className="flex justify-between text-xs font-semibold text-white/80 mb-1.5 uppercase tracking-wider"><span>Velocity Profile</span></div>
-                  <div className="h-1.5 bg-white/20 rounded-full overflow-hidden flex">
-                     <div className="h-full bg-[#34d399] w-[90%]"></div>
-                  </div>
-                </div>
-             </div>
-          </div>
-
-          {/* Rack Visualization */}
-          <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm flex-1">
-             <div className="flex justify-between items-center mb-6">
-               <h4 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                 RACK VISUALIZATION: 
-                 <select 
-                   value={rack} 
-                   onChange={(e) => {
-                     const firstLoc = compatibleLocators.find(l => l.rack === e.target.value);
-                     if (firstLoc) setSelectedLocator(firstLoc.id);
-                   }}
-                   className="p-1 ml-2 border border-slate-200 rounded text-sm bg-slate-50 text-slate-800 font-bold outline-none"
-                 >
-                   {Array.from(new Set(compatibleLocators.map(l => l.rack))).map(r => {
-                     const rLocs = compatibleLocators.filter(l => l.rack === r);
-                     const maxVol = rLocs.reduce((sum, l) => sum + l.maxVolumeM3, 0);
-                     return <option key={r} value={r}>Rack {r} (Capacity: {maxVol.toFixed(1)} m³)</option>
-                   })}
-                 </select>
-               </h4>
-               <div className="flex items-center gap-3 text-[10px] font-bold uppercase text-slate-500">
-                 <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#e2e8f0]"></span> Vacant</span>
-                 <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full bg-[#34d399]"></span> Occupied</span>
-                 <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full border-2 border-rose-500"></span> Target/Selected</span>
-               </div>
-             </div>
-
-             <div className="relative w-full overflow-x-auto pb-4">
-               <div className="flex flex-col gap-6 w-max min-w-full">
-                 {levels.map((lvl) => (
-                   <div key={lvl} className="flex relative items-center pb-2 pt-2">
-                     <div className="flex-1 flex gap-4 justify-between">
-                       {columns.map(c => {
-                         const locId = `${c}.${lvl}`;
-                         // Pengecekan aman, memastikan locId valid di dalam zona yang sedang difilter
-                         const isValidLoc = rackLocators.some(l => l.id === locId);
-                         if (!isValidLoc) return <div key={c} className="w-32 flex-shrink-0" />;
-
-                         const isTarget = locId === selectedLocator;
-                         const stat = getSlotStat(locId);
-                         const isVacant = stat.pct === 0 && !isTarget;
-                         const borderColor = isTarget ? 'border-rose-500' : 'border-slate-200';
-                         
-                         return (
-                           <div key={c} className="w-32 flex-shrink-0 flex items-center justify-center cursor-pointer" onClick={() => setSelectedLocator(locId)}>
-                              {/* Slot Card */}
-                              <div className={`w-full bg-white border-2 ${borderColor} rounded-lg p-2.5 shadow-[0_2px_8px_-3px_rgba(0,0,0,0.05)] relative overflow-hidden transition-all ${isTarget ? 'shadow-md ring-2 ring-rose-500/20 scale-[1.02]' : 'hover:shadow-sm'}`}>
-                                 
-                                 {/* Slot ID & % */}
-                                 <div className="flex justify-between items-start mb-2">
-                                   <span className="font-bold text-slate-800 text-xs">{c.replace('FL-','')}.{lvl}</span>
-                                   <span className={`text-[10px] font-mono font-bold ${stat.pct >= 95 ? 'text-rose-600' : 'text-slate-400'} ${isTarget ? 'text-rose-600' : ''}`}>
-                                     {stat.pct}%
-                                   </span>
-                                 </div>
-
-                               {/* Content */}
-                               <div className="h-10 flex flex-col justify-center">
-                                 {isVacant ? (
-                                   <span className="text-[10px] italic font-semibold text-slate-300 text-center tracking-widest uppercase">VACANT</span>
-                                 ) : (
-                                   <>
-                                     <div className="text-[10px] font-bold text-slate-800 truncate">
-                                       {stat.items[0]?.sku || '---'}
-                                     </div>
-                                     <div className="text-[9px] font-medium text-slate-500 mt-0.5">
-                                       {stat.items.map((i: any) => i.qty).reduce((a:number,b:number)=>a+b,0)} PCS
-                                     </div>
-                                   </>
-                                 )}
-                               </div>
-
-                               {/* Progress bar */}
-                               <div className="mt-2">
-                                 <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden">
-                                   <div className={`h-full transition-all duration-500 ${stat.pct > 100 ? 'bg-red-600' : getUtilColor(stat.pct)}`} style={{ width: `${Math.min(stat.pct, 100)}%` }}></div>
-                                 </div>
-                                 <div className="flex justify-between items-center mt-1">
-                                   <span className="text-[8px] font-mono font-medium text-slate-500">{stat.usedVol.toFixed(2)} m³</span>
-                                   <span className="text-[8px] font-mono text-slate-400">{stat.maxVol.toFixed(1)} m³ Max</span>
-                                 </div>
-                               </div>
-
-                            </div>
-                            
-                            {/* Beam decoration visually */}
-                            <div className="absolute bottom-0 left-0 right-0 h-1.5 bg-[#1e293b] rounded-sm transform translate-y-3 mx-1">
-                              <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-t-transparent border-r-4 border-r-[#1e293b] border-b-4 border-b-transparent"></div>
-                              <div className="absolute -right-1 top-1/2 -translate-y-1/2 w-0 h-0 border-t-4 border-t-transparent border-l-4 border-l-[#1e293b] border-b-4 border-b-transparent"></div>
-                            </div>
-                         </div>
-                       );
-                     })}
-                   </div>
+            <div className="bg-white border border-slate-200 rounded-lg p-6 shadow-sm flex-1">
+               <div className="flex justify-between items-center mb-6">
+                 <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                   Live Layout Grid Matrix: 
+                   <select 
+                     value={rack} 
+                     onChange={(e) => {
+                       const firstLoc = compatibleLocators.find(l => l.rack === e.target.value);
+                       if (firstLoc && tempAllocations.length === 0) {
+                         // Hanya ganti fokus visual jika tidak ada alokasi gantung
+                       }
+                     }}
+                     className="p-1 border border-slate-200 bg-slate-50 text-slate-800 rounded font-mono font-bold outline-none text-xs"
+                   >
+                     {Array.from(new Set(compatibleLocators.map(l => l.rack))).map(r => (
+                       <option key={r} value={r}>Block Rack {r}</option>
+                     ))}
+                   </select>
+                 </h4>
+                 <div className="flex items-center gap-3 text-[9px] font-bold uppercase text-slate-400">
+                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#e2e8f0]"></span> Vacant</span>
+                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-[#34d399]"></span> Full</span>
+                   <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full border-2 border-rose-500 bg-rose-50"></span> Multi Selected</span>
                  </div>
-               ))}
                </div>
-             </div>
 
-             <div className="mt-4 pt-4 border-t border-slate-100 flex justify-between items-center">
-               <span className="text-[10px] font-mono font-medium text-slate-400 uppercase tracking-widest">
-                 Rack Sill Beam Capacity Dynamic
-               </span>
-               <span className="text-[10px] font-bold italic text-slate-500">Selected Target: {selectedLocator || '-'}</span>
-             </div>
-          </div>
+               <div className="relative w-full overflow-x-auto pb-4">
+                 <div className="flex flex-col gap-5 w-max min-w-full">
+                   {levels.map((lvl) => (
+                     <div key={lvl} className="flex relative items-center py-1">
+                       <div className="w-12 text-right pr-3 text-[11px] font-mono font-bold text-slate-400">L-{lvl}</div>
+                       <div className="flex gap-4">
+                         {columns.map(c => {
+                           const locId = `${c}.${lvl}`;
+                           const isValidLoc = rackLocators.some(l => l.id === locId);
+                           if (!isValidLoc) return <div key={c} className="w-28 flex-shrink-0" />;
 
-        </section>
+                           const stat = getSlotStat(locId);
+                           const isAllocatedInGrid = tempAllocations.some(t => t.locatorId === locId);
+                           const isVacant = stat.pct === 0 && !isAllocatedInGrid;
+                           
+                           const cardBorderColor = isAllocatedInGrid 
+                             ? 'border-rose-500 bg-rose-50/40 ring-2 ring-rose-500/20 scale-[1.02]' 
+                             : 'border-slate-200 hover:border-slate-400';
+                           
+                           return (
+                             <div key={c} className="w-28 flex-shrink-0 cursor-pointer" onClick={() => handleSlotGridClick(locId)}>
+                                <div className={`w-full bg-white border-2 ${cardBorderColor} rounded-md p-2 relative transition-all`}>
+                                   <div className="flex justify-between items-center text-[10px] font-bold text-slate-700 mb-1">
+                                     <span>{c.replace('FL-','')}.{lvl}</span>
+                                     <span className="text-slate-400">{stat.pct}%</span>
+                                   </div>
+                                   <div className="h-7 flex flex-col justify-center text-[10px]">
+                                     {isAllocatedInGrid ? (
+                                       <div className="text-center bg-rose-500 text-white rounded font-bold py-0.5 animate-pulse text-[9px]">
+                                         +{stat.allocatedQty} PCS
+                                       </div>
+                                     ) : isVacant ? (
+                                       <span className="text-slate-300 text-center block italic font-medium tracking-wider">EMPTY</span>
+                                     ) : (
+                                       <>
+                                         <p className="font-bold text-slate-800 truncate">{stat.items[0]?.sku || '---'}</p>
+                                         <p className="text-[9px] text-slate-400">{stat.items.reduce((acc: number, curr: any) => acc + curr.qty, 0)} Pcs</p>
+                                       </>
+                                     )}
+                                   </div>
+                                   <div className="h-1 w-full bg-slate-100 rounded-full overflow-hidden mt-1.5">
+                                     <div className={`h-full ${isAllocatedInGrid ? 'bg-rose-500' : stat.pct >= 85 ? 'bg-amber-400' : 'bg-emerald-400'}`} style={{ width: `${Math.min(stat.pct, 100)}%` }}></div>
+                                   </div>
+                                </div>
+                             </div>
+                           );
+                         })}
+                       </div>
+                     </div>
+                   ))}
+                 </div>
+               </div>
+            </div>
+          </section>
+        </div>
+
+        {/* PREVIEW HASIL KONFIRMASI (Tampil di Layar Bawah) */}
+        {lastPrintedBatch && lastPrintedBatch.length > 0 && (
+          <section className="bg-white border border-emerald-200 rounded-lg p-6 shadow-sm mt-6">
+            <div className="flex justify-between items-center mb-5">
+              <div>
+                <h3 className="text-lg font-bold text-[#0F294D] flex items-center gap-2">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                  Preview Manifes Terakhir
+                </h3>
+                <p className="text-xs text-slate-500 mt-1">Ref: INB-MULTI-SPLIT • {printDate}</p>
+              </div>
+              <button 
+                onClick={() => window.print()} 
+                className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded text-sm font-bold flex items-center gap-2 transition-colors"
+              >
+                <Printer className="w-4 h-4" />
+                Cetak Ulang
+              </button>
+            </div>
+            
+            <div className="overflow-x-auto rounded border border-slate-200">
+              <table className="w-full text-left border-collapse text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-600">
+                    <th className="p-3 font-bold border-r border-slate-200 uppercase text-xs">Item SKU</th>
+                    <th className="p-3 font-bold border-r border-slate-200 uppercase text-xs">Nama Produk</th>
+                    <th className="p-3 font-bold border-r border-slate-200 uppercase text-xs text-center">Kuantitas</th>
+                    <th className="p-3 font-bold border-r border-slate-200 uppercase text-xs text-center">Volume</th>
+                    <th className="p-3 font-bold uppercase text-xs text-center">Target Slot</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {lastPrintedBatch.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="p-3 font-mono font-bold text-blue-700 border-r border-slate-200">{item.sku}</td>
+                      <td className="p-3 text-slate-700 border-r border-slate-200">{item.name}</td>
+                      <td className="p-3 text-center font-bold text-slate-800 border-r border-slate-200">{item.qty} PCS</td>
+                      <td className="p-3 text-center text-slate-500 border-r border-slate-200">{item.volume.toFixed(3)} m³</td>
+                      <td className="p-3 text-center font-bold bg-slate-50 text-slate-800">{item.locatorId}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        )}
       </div>
 
-      {/* Ledger Table */}
-      <div className="bg-white border border-slate-200 rounded-lg p-0 shadow-sm mt-4">
-         <div className="p-4 border-b border-slate-200 flex justify-between items-center">
-            <h4 className="text-[15px] font-bold text-[#0F294D] flex items-center gap-2">
-               <Shield className="w-4 h-4 text-[#009254]" />
-               Inbound Transaction Ledger
-            </h4>
-            <button className="text-sm font-bold text-[#24549A] hover:underline">View All Records</button>
-         </div>
-         <div className="overflow-x-auto">
-            <table className="w-full text-left">
-               <thead className="bg-slate-50/50">
-                  <tr>
-                     <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Transaction ID</th>
-                     <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">SKU</th>
-                     <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Slot</th>
-                     <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Operator</th>
-                     <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Timestamp</th>
-                     <th className="px-6 py-3 text-xs font-bold text-slate-500 uppercase tracking-wider">Status</th>
-                  </tr>
-               </thead>
-               <tbody className="divide-y divide-slate-100">
-                  {transactions.length === 0 ? (
-                    <tr><td colSpan={6} className="px-6 py-8 text-center text-slate-400 text-sm">No recent transactions.</td></tr>
-                  ) : transactions.map(tx => (
-                     <tr key={tx.id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-3 text-xs font-bold text-blue-600 font-mono">#{tx.id.split('-')[0].toUpperCase()}</td>
-                        <td className="px-6 py-3 text-xs font-bold text-slate-800">{tx.sku}</td>
-                        <td className="px-6 py-3 text-xs text-slate-600 font-mono">{tx.locatorId}</td>
-                        <td className="px-6 py-3 text-xs text-slate-600 font-medium">{tx.operator}</td>
-                        <td className="px-6 py-3 text-xs text-slate-500">{new Date(tx.timestamp).toLocaleTimeString()}</td>
-                        <td className="px-6 py-3">
-                           <span className="px-2 py-1 bg-emerald-100/50 text-emerald-700 text-[10px] font-bold uppercase tracking-wider border border-emerald-200/50 rounded flex w-max items-center gap-1">
-                              Verified
-                           </span>
-                        </td>
-                     </tr>
-                  ))}
-               </tbody>
-            </table>
-         </div>
+      {/* AREA PRINT ONLY */}
+      <div className="hidden print:block bg-white text-black p-8 font-sans w-full text-sm leading-relaxed">
+        <div className="flex justify-between items-start border-b-4 border-black pb-4 mb-6">
+          <div>
+            <h1 className="text-2xl font-black tracking-tight uppercase">MANIFES BUKTI TANDA TERIMA BARANG (INBOUND)</h1>
+            <p className="text-xs text-gray-600 mt-0.5">Sistem WMS Inventory — PT Parahita Prima Sentosa</p>
+          </div>
+          <div className="text-right">
+             <div className="bg-black text-white px-3 py-1 text-xs font-bold uppercase tracking-wider rounded">DOKUMEN VALID</div>
+             <p className="text-[10px] text-gray-500 mt-1">Ref: INB-MULTI-SPLIT</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 bg-gray-50 border border-gray-300 rounded p-4 mb-6 text-xs font-medium">
+          <div>
+            <p className="text-gray-500">Waktu Validasi Sukses:</p>
+            <p className="text-sm font-bold text-gray-900 font-mono">{printDate || '-'}</p>
+          </div>
+          <div>
+            <p className="text-gray-500">Operator Gudang:</p>
+            <p className="text-sm font-bold text-gray-900 uppercase">{lastPrintedBatch && lastPrintedBatch[0]?.operator}</p>
+          </div>
+        </div>
+
+        <h3 className="text-xs font-black uppercase text-gray-700 tracking-wider mb-2">Daftar Hasil Distribusi Multi-Rak (Putaway Alokasi):</h3>
+        <table className="w-full text-left border-collapse border border-gray-300 text-xs mb-8">
+          <thead>
+            <tr className="bg-gray-100 border-b border-gray-300">
+              <th className="p-3 font-bold border-r border-gray-300 uppercase">Item SKU</th>
+              <th className="p-3 font-bold border-r border-gray-300 uppercase">Nama Produk</th>
+              <th className="p-3 font-bold text-center border-r border-gray-300 uppercase">Kuantitas Masuk</th>
+              <th className="p-3 font-bold text-center border-r border-gray-300 uppercase">Volume Terpakai</th>
+              <th className="p-3 font-bold text-center uppercase">Target Slot Rak</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-300">
+            {lastPrintedBatch?.map((item, idx) => (
+              <tr key={idx} className="font-mono">
+                <td className="p-3 font-bold border-r border-gray-300 text-blue-800">{item.sku}</td>
+                <td className="p-3 border-r border-gray-300 font-sans text-gray-700">{item.name}</td>
+                <td className="p-3 text-center border-r border-gray-300 font-bold font-sans text-sm">{item.qty} PCS</td>
+                <td className="p-3 text-center border-r border-gray-300 text-gray-500">{item.volume.toFixed(3)} m³</td>
+                <td className="p-3 text-center font-black bg-gray-50 text-gray-900 text-sm">{item.locatorId}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="mt-16 grid grid-cols-2 text-center text-xs pt-8">
+          <div className="flex flex-col items-center">
+            <p className="text-gray-500 mb-14">Diverifikasi Oleh Staff,</p>
+            <div className="w-40 border-b border-black mb-1"></div>
+            <p className="font-bold uppercase">{lastPrintedBatch && lastPrintedBatch[0]?.operator}</p>
+          </div>
+          <div className="flex flex-col items-center">
+            <p className="text-gray-500 mb-14">Mengetahui Kepala Gudang,</p>
+            <div className="w-40 border-b border-black mb-1"></div>
+            <p className="font-bold uppercase">Supervisor Logistik</p>
+          </div>
+        </div>
       </div>
     </div>
   );
