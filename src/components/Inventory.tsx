@@ -110,37 +110,59 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
           setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin atau Kepala Gudang JKT yang boleh mengubah data SKU.' });
           return;
         }
-        await updateProduct(editingProduct.sku, formData);
 
-        // Jika user adalah Super Admin, proses update stok di masing-masing rack unit
+        const productVol = Number(formData.volumeM3) || 0;
+        const oldProductVol = Number(editingProduct.volumeM3) || 0;
+
+        // 1. Validasi kapasitas dlu untuk semua slot yang diedit maupun yang ditempati produk ini
+        const locsToCheck = new Set<string>();
+
+        // Tambah slot-slot dari editLocStocks (jika super admin mengedit stocks)
         if (isSuperAdmin) {
-          const productVol = Number(formData.volumeM3) || 0;
-          
-          // 1. Validasi kapasitas dlu untuk semua slot yang diedit
-          for (const [locId, newQty] of Object.entries(editLocStocks)) {
-            const oldQty = previousLocStocks[locId] || 0;
-            const diff = Number(newQty) - Number(oldQty);
-            if (diff > 0) {
-              const targetLoc = locators.find(l => l.id === locId);
-              if (targetLoc) {
-                const currentUsage = locatorUsage[locId] || 0;
-                // Selisih volume yang ditambah:
-                const projectedUsage = currentUsage + (diff * productVol);
-                if (projectedUsage > targetLoc.maxVolumeM3) {
-                  const maxPcsPossible = productVol > 0 ? Math.floor((targetLoc.maxVolumeM3 - (currentUsage - (oldQty * productVol))) / productVol) : 0;
-                  setMessage({
-                    type: 'error',
-                    text: `Gagal Menyimpan! Kapasitas Rak Slot "${locId}" tidak cukup untuk penambahan stok.\n` +
-                          `Sisa Kapasitas Maksimal: ${(targetLoc.maxVolumeM3 - (currentUsage - (oldQty * productVol))).toFixed(4)} m³.\n` +
-                          `👉 Rak ini hanya dapat menampung maksimal ${maxPcsPossible} PCS produk ini.`
-                  });
-                  return;
-                }
-              }
+          Object.keys(editLocStocks).forEach(locId => locsToCheck.add(locId));
+        }
+
+        // Tambah slot-slot yang memiliki produk ini saat ini (dari inventoryDetails)
+        const invData = inventoryDetails[editingProduct.sku];
+        if (invData && invData.locators) {
+          Object.entries(invData.locators).forEach(([locId, data]: [string, any]) => {
+            if (data.physicalQty > 0) {
+              locsToCheck.add(locId);
+            }
+          });
+        }
+
+        // Jalankan pengecekan kapasitas untuk setiap slot yang terlibat
+        for (const locId of locsToCheck) {
+          const targetLoc = locators.find(l => l.id === locId);
+          if (targetLoc) {
+            const currentUsage = locatorUsage[locId] || 0;
+            const originalSkuQty = previousLocStocks[locId] || 0;
+            const newSkuQty = isSuperAdmin ? (editLocStocks[locId] || 0) : originalSkuQty;
+
+            // Hitung sisa volume selain produk ini
+            const baseUsage = Math.max(0, currentUsage - (originalSkuQty * oldProductVol));
+            // Proyeksi occupancy total dengan volume produk baru & qty produk baru
+            const projectedUsage = baseUsage + (newSkuQty * productVol);
+
+            if (projectedUsage > targetLoc.maxVolumeM3) {
+              const maxPcsPossible = productVol > 0 ? Math.floor((targetLoc.maxVolumeM3 - baseUsage) / productVol) : 0;
+              setMessage({
+                type: 'error',
+                text: `Gagal Menyimpan! Kapasitas Rak Slot "${locId}" melampaui batas.\n` +
+                      `Sisa Kapasitas selain produk ini: ${(targetLoc.maxVolumeM3 - baseUsage).toFixed(4)} m³.\n` +
+                      `👉 Rak ini hanya dapat menampung maksimal ${maxPcsPossible} PCS produk ini.`
+              });
+              return;
             }
           }
+        }
 
-          // 2. Jika validasi lolos, buat transaksi adjustment untuk locator yang berubah
+        // Jika validasi sukses, lakukan update
+        await updateProduct(editingProduct.sku, formData);
+
+        // 2. Jika user adalah Super Admin, proses update stok di masing-masing rack unit
+        if (isSuperAdmin) {
           const operatorName = currentUser?.name || 'SUPER ADMIN';
           
           // Gabungkan keys lama dan baru
