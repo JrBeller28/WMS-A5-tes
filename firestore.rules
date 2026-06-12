@@ -1,8 +1,50 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    
+    // Default Deny Safety Net
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Secure Profiles (Role Based Access Control)
+    match /users/{userId} {
+      allow read: if isSignedIn();
+      // Allows user self-creation during registration
+      allow create: if isOwner(userId);
+      // Blocks users from modifying their privilege fields (role, username, email) directly to avoid privilege escalation
+      allow update: if isOwner(userId) && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'username', 'email']));
+      allow delete: if false;
+    }
+
+    // Concurrent login session tracking
+    match /sessions/{username} {
+      allow read, write: if isSignedIn();
+    }
+
+    // Warehouse Master & Transaction Data
+    match /products/{sku} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /locators/{locatorId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
+    match /transactions/{transactionId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
     }
   }
 }
