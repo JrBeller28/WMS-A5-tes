@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Activity, Box, LogIn, LogOut, AlertTriangle, RefreshCw, Clock, X, Search } from 'lucide-react';
+import { Activity, Box, LogIn, LogOut, AlertTriangle, RefreshCw, Clock, X, Search, Zap } from 'lucide-react';
 import { WarehouseVisualizer } from './WarehouseVisualizer';
-import { getInventoryStats, getTransactions, getProducts, getLocators, getInventoryDetails } from '../lib/db';
+import { getInventoryStats, getTransactions, getProducts, getLocators, getInventoryDetails, addTransaction } from '../lib/db';
 import { AuditLog } from './AuditLog';
 import { getCurrentUser } from '../lib/auth';
+import { v4 as uuidv4 } from 'uuid';
 
 export function Dashboard({ 
   globalSearch = '', 
@@ -21,7 +22,42 @@ export function Dashboard({
   const [criticalRacks, setCriticalRacks] = useState<any[]>([]);
   const [showCriticalModal, setShowCriticalModal] = useState<boolean>(false);
   const [searchCritical, setSearchCritical] = useState<string>('');
+  const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const user = getCurrentUser();
+
+  const handleAutoAdjust = async (rackId: string, sku: string, currentQty: number, maxQty: number) => {
+    try {
+      const diff = maxQty - currentQty;
+      if (diff >= 0) return;
+
+      const txId = uuidv4();
+      const adjustTx = {
+        id: txId,
+        type: 'OUTBOUND' as const,
+        sku: sku,
+        qty: diff, // Negative quantity for OUTBOUND subtraction
+        locatorId: rackId,
+        operator: user?.name || 'System Auto-Adjust',
+        timestamp: new Date().toISOString(),
+        status: 'CONFIRMED' as const,
+        memo: `Auto-Adjust Stock to Max Rack Capacity Limit (dari ${currentQty} ke ${maxQty})`
+      };
+
+      await addTransaction(adjustTx);
+      setActionMessage({
+        type: 'success',
+        text: `Sukses menyesuaikan stok ${sku} di rak ${rackId}! Qty telah dikurangi sebanyak ${Math.abs(diff)} unit agar sesuai kapasitas maksimal (${maxQty} Unit).`
+      });
+      await fetchStats();
+      setTimeout(() => setActionMessage(null), 4000);
+    } catch (err) {
+      console.error("Gagal melakukan penyesuaian stok:", err);
+      setActionMessage({
+        type: 'error',
+        text: `Gagal melakukan penyesuaian stok: ${(err as Error).message}`
+      });
+    }
+  };
 
   const fetchStats = async () => {
     try {
@@ -73,7 +109,7 @@ export function Dashboard({
       setPendingOutboundCount(totalPendingOutbound);
 
       // 4. Kalkulasi rack slot dengan okupansi kritis (>= 90%)
-      const locatorStats: Record<string, { usedVol: number; maxVol: number; percentage: number; items: { sku: string; name: string; qty: number }[] }> = {};
+      const locatorStats: Record<string, { usedVol: number; maxVol: number; percentage: number; items: { sku: string; name: string; qty: number; volPerUnit: number }[] }> = {};
       locs.forEach(l => {
         locatorStats[l.id] = { usedVol: 0, maxVol: l.maxVolumeM3, percentage: 0, items: [] };
       });
@@ -86,7 +122,7 @@ export function Dashboard({
           const qty = locData.physicalQty;
           if (qty > 0 && locatorStats[locId]) {
             locatorStats[locId].usedVol += (qty * volPerUnit);
-            locatorStats[locId].items.push({ sku, name: prod?.name || 'Unknown', qty });
+            locatorStats[locId].items.push({ sku, name: prod?.name || 'Unknown', qty, volPerUnit });
           }
         });
       });
@@ -287,6 +323,18 @@ export function Dashboard({
               )}
             </div>
 
+            {/* Action Feedback Banner */}
+            {actionMessage && (
+              <div className={`p-4 mx-6 mt-4 rounded-xl text-xs font-bold leading-relaxed shadow-sm transition-all flex items-center gap-2 border ${
+                actionMessage.type === 'success' 
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                  : 'bg-rose-50 text-rose-800 border-rose-200'
+              }`}>
+                <div className="w-1.5 h-1.5 rounded-full shrink-0 animate-ping bg-current" />
+                <span>{actionMessage.text}</span>
+              </div>
+            )}
+
             {/* List Body */}
             <div className="p-6 overflow-y-auto space-y-4 flex-1">
               {criticalRacks.filter(r => 
@@ -330,24 +378,54 @@ export function Dashboard({
 
                         {/* Progress Bar */}
                         <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden mb-3">
-                          <div className="bg-rose-500 h-full rounded-full" style={{ width: `${r.percentage}%` }}></div>
+                          <div className="bg-rose-500 h-full rounded-full" style={{ width: `${Math.min(100, r.percentage)}%` }}></div>
                         </div>
 
                         {/* Stored Items inside Slot */}
-                        <div className="space-y-1.5">
-                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Daftar Material Tersimpan:</p>
-                          {r.items.map((it: any, iIdx: number) => (
-                            <div key={iIdx} className="flex justify-between items-center bg-slate-50 py-1.5 px-3 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-100 transition-colors">
-                              <div className="flex gap-1.5 items-center">
-                                <span className="font-mono font-bold text-slate-800 shrink-0">{it.sku}</span>
-                                <span className="text-slate-400 shrink-0">|</span>
-                                <span className="truncate max-w-[200px] sm:max-w-xs">{it.name}</span>
+                        <div className="space-y-2">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1.5">Daftar Material Tersimpan & Batas Kapasitas:</p>
+                          {r.items.map((it: any, iIdx: number) => {
+                            const maxAmount = it.volPerUnit > 0 ? Math.floor(r.maxVol / it.volPerUnit) : 0;
+                            const isOverCap = it.qty > maxAmount;
+                            return (
+                              <div key={iIdx} className="flex flex-col md:flex-row md:items-center justify-between gap-3 border border-slate-100 bg-slate-50/75 p-3 rounded-xl hover:bg-slate-50 hover:border-slate-200 transition-all font-medium text-slate-700">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <span className="p-1 px-2 bg-slate-200 text-slate-800 font-mono font-bold text-[10px] rounded border border-slate-300 shrink-0">
+                                    {it.sku}
+                                  </span>
+                                  <span className="text-slate-400 font-mono text-[10px] shrink-0">|</span>
+                                  <span className="truncate text-xs font-bold text-slate-700 max-w-[200px] xl:max-w-xs">{it.name}</span>
+                                </div>
+                                <div className="flex flex-wrap items-center gap-3 shrink-0">
+                                  <div className="flex items-center gap-1 font-sans text-[11px] text-slate-500">
+                                    <span>Stok:</span>
+                                    <span className={`font-mono font-black px-2 py-0.5 rounded shadow-sm text-xs border ${
+                                      isOverCap 
+                                        ? 'bg-rose-100 text-rose-700 border-rose-200 animate-pulse' 
+                                        : 'bg-white text-slate-800 border-slate-200'
+                                    }`}>
+                                      {it.qty} Unit
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1 font-sans text-[11px] text-slate-500">
+                                    <span>Kapasitas Rak:</span>
+                                    <span className="font-mono font-black bg-emerald-50 text-emerald-800 border border-emerald-100 px-2 py-0.5 rounded shadow-sm text-xs">
+                                      {maxAmount === 0 ? 'N/A' : `Maks ${maxAmount} Unit`}
+                                    </span>
+                                  </div>
+                                  {isOverCap && maxAmount > 0 && (
+                                    <button 
+                                      onClick={() => handleAutoAdjust(r.id, it.sku, it.qty, maxAmount)}
+                                      className="flex items-center gap-1 px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg text-[10px] uppercase tracking-wider shadow-sm cursor-pointer transition-all hover:scale-[1.02]"
+                                    >
+                                      <Zap className="w-3.5 h-3.5 fill-current shrink-0 text-yellow-300" />
+                                      Pangkas ke {maxAmount} Unit
+                                    </button>
+                                  )}
+                                </div>
                               </div>
-                              <span className="font-bold text-slate-900 border border-slate-200 bg-white px-2 py-0.5 rounded shadow-sm shrink-0">
-                                {it.qty} Unit
-                              </span>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     );
