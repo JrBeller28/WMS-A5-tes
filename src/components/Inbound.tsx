@@ -38,6 +38,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
   const [receiptPreview, setReceiptPreview] = useState<ReceiptPreviewData | null>(null);
 
   const [showScanner, setShowScanner] = useState(false);
+  const [manualRack, setManualRack] = useState<string>('');
 
   // ==========================================
   // STATE MANAGEMENT (LOCALSTORAGE)
@@ -85,12 +86,13 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
 
   const compatibleLocators = locators.filter(l => {
     if (!productDetails?.category) return true;
-    return l.zone === productDetails.category;
+    return l.zone === productDetails.category || l.rack.startsWith('FL');
   });
 
   // Validasi otomatis saat SKU dipilih
   useEffect(() => {
     setTempAllocations([]);
+    setManualRack('');
     if (selectedSku) {
       const prod = products.find(p => p.sku === selectedSku);
       if (!prod || prod.volumeM3 === undefined || prod.volumeM3 === null || prod.volumeM3 <= 0) {
@@ -117,7 +119,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
     setLoading(true);
     try {
       const recs = await getPutawayRecommendations(selectedSku, unallocatedQty);
-      const filteredRecs = recs.filter(r => !productDetails?.category || r.zone === productDetails.category);
+      const filteredRecs = recs.filter(r => !productDetails?.category || r.zone === productDetails.category || r.rack.startsWith('FL'));
       setRecommendations(filteredRecs);
     } catch (e: any) {
       console.error(e);
@@ -395,19 +397,26 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
   const currentHistoryData = consolidatedHistoryList.slice((historyCurrentPage - 1) * historyPageSize, historyCurrentPage * historyPageSize);
 
   const recommendedLoc = recommendations[0];
-  let rack = 'FL-A';
-  if (tempAllocations.length > 0) {
+  
+  const availableRacks = Array.from(new Set(compatibleLocators.map(l => l.rack))).sort((a,b) => {
+    return (a as string).localeCompare(b as string, undefined, {numeric: true});
+  }) as string[];
+
+  let selectedActiveRack = 'FL-A';
+  if (manualRack && availableRacks.includes(manualRack)) {
+    selectedActiveRack = manualRack;
+  } else if (tempAllocations.length > 0) {
     const lastSelected = compatibleLocators.find(l => l.id === tempAllocations[tempAllocations.length - 1].locatorId);
-    if (lastSelected) rack = lastSelected.rack;
+    if (lastSelected) selectedActiveRack = lastSelected.rack;
   } else if (recommendedLoc) {
-    rack = recommendedLoc.rack;
+    selectedActiveRack = recommendedLoc.rack;
   } else if (compatibleLocators.length > 0) {
-    rack = compatibleLocators[0].rack;
+    selectedActiveRack = compatibleLocators[0].rack;
   }
   
-  const rackLocators = compatibleLocators.filter(l => l.rack === rack);
+  const rackLocators = compatibleLocators.filter(l => l.rack === selectedActiveRack);
   const columns = Array.from(new Set(rackLocators.map(l => l.column as string))).sort((a, b) => (a as string).localeCompare(b as string, undefined, { numeric: true }));
-  const maxLevel = rack.startsWith('FL') ? 2 : (rackLocators.length > 0 ? Math.max(...rackLocators.map(l => l.level)) : 4);
+  const maxLevel = selectedActiveRack.startsWith('FL') ? 2 : (rackLocators.length > 0 ? Math.max(...rackLocators.map(l => l.level)) : 4);
   const levels = Array.from({length: maxLevel}, (_, i) => maxLevel - i);
 
   return (
@@ -564,10 +573,38 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
             </div>
 
             <div className="bg-white border border-slate-200 rounded-lg p-4 shadow-sm flex-1">
+               {availableRacks.length > 1 && (
+                 <div className="mb-4">
+                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Pilih Blok Rak Aktif (Zona & Buffer FL):</label>
+                   <div className="flex flex-wrap gap-1.5 pb-2 border-b border-slate-100">
+                     {availableRacks.map(rPref => {
+                       const isActive = selectedActiveRack === (rPref as string);
+                       const isFL = (rPref as string).startsWith('FL');
+                       return (
+                         <button
+                           key={rPref as string}
+                           type="button"
+                           onClick={() => setManualRack(rPref as string)}
+                           className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-sm ${
+                             isActive 
+                               ? 'bg-[#24549A] text-white ring-2 ring-blue-200' 
+                               : isFL 
+                                 ? 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200' 
+                                 : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                           }`}
+                         >
+                           {rPref} {isFL ? '⚡ FL' : '📦 Rack'}
+                         </button>
+                       );
+                     })}
+                   </div>
+                 </div>
+               )}
+
                <div className="flex justify-between items-center mb-4">
                  <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
                    Live Layout Grid: 
-                   <span className="p-1 border border-slate-200 bg-slate-50 text-slate-800 rounded font-mono font-bold text-xs">Block Rack {rack}</span>
+                   <span className="p-1 border border-slate-200 bg-slate-50 text-slate-800 rounded font-mono font-bold text-xs">Block Rack {selectedActiveRack}</span>
                  </h4>
                  <div className="flex items-center gap-2 text-[9px] font-bold text-slate-400 uppercase">
                    <span className="flex items-center gap-0.5"><span className="w-1.5 h-1.5 rounded-full bg-[#e2e8f0]"></span> Kosong</span>
