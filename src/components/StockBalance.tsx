@@ -33,6 +33,26 @@ interface GroupedStock {
   items: StockBalanceItem[];
 }
 
+// Fungsi pembantu untuk memisahkan baris CSV dengan aman (menangani tanda kutip koma)
+const parseCSVLine = (line: string): string[] => {
+  const result: string[] = [];
+  let current = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim().replace(/^"|"$/g, ''));
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim().replace(/^"|"$/g, ''));
+  return result;
+};
+
 export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
   const [stockItems, setStockItems] = useState<StockBalanceItem[]>([]);
   const [realStockInputs, setRealStockInputs] = useState<Record<string, string>>({});
@@ -54,12 +74,58 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
     try {
       const [prods, invDetails] = await Promise.all([getProducts(), getInventoryDetails()]);
       
+      // Objek Map untuk menampung data dari Google Sheets
+      const gsheetMapping: Record<string, string> = {};
+      
+      try {
+        const gsheetUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSbvA_5FOxi2-nkfz8iJbptOhDfBCLM5LnTwrVLeJ4pf1hlGjSBywsTXQYYtEjuo0DY2M63wcJmc0tP/pub?gid=1541449669&single=true&output=csv';
+        const response = await fetch(gsheetUrl);
+        const csvText = await response.text();
+        
+        const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+        if (lines.length > 0) {
+          const headers = parseCSVLine(lines[0]);
+          
+          // Cari indeks kolom berdasarkan nama header di GSheet
+          const skuIdx = headers.findIndex(h => h.toLowerCase().includes('sku'));
+          const nameIdx = headers.findIndex(h => h.toLowerCase().includes('nama'));
+          const stockIdx = headers.findIndex(h => h.toLowerCase().includes('stock sistem') || h.toLowerCase().includes('stok sistem'));
+          
+          if (skuIdx !== -1 && stockIdx !== -1) {
+            for (let i = 1; i < lines.length; i++) {
+              const cols = parseCSVLine(lines[i]);
+              if (cols.length > Math.max(skuIdx, stockIdx)) {
+                const skuKey = cols[skuIdx].trim().toLowerCase();
+                const nameKey = nameIdx !== -1 ? cols[nameIdx].trim().toLowerCase() : '';
+                const stockValue = cols[stockIdx].trim();
+                
+                // Buat key kombinasi SKU + Nama agar pencocokan sangat presisi
+                const compositeKey = `${skuKey}_${nameKey}`;
+                gsheetMapping[compositeKey] = stockValue;
+                
+                // Fallback key berbasis SKU saja jika nama di DB & GSheet memiliki sedikit perbedaan spasi
+                if (!gsheetMapping[skuKey]) {
+                  gsheetMapping[skuKey] = stockValue;
+                }
+              }
+            }
+          }
+        }
+      } catch (csvError) {
+        console.error('Gagal memuat data dari GSheet, menggunakan fallback internal:', csvError);
+      }
+
       const flattenedItems: StockBalanceItem[] = [];
       const initialInputs: Record<string, string> = {};
 
       prods.forEach((p) => {
         const invData = invDetails[p.sku] || { totalPhysicalQty: 0, locators: {} };
         const locatorsEntries = Object.entries(invData.locators);
+
+        // Ambil nilai dari hasil mapping GSheet
+        const pSkuLower = p.sku.trim().toLowerCase();
+        const pNameLower = p.name.trim().toLowerCase();
+        const matchedGsheetValue = gsheetMapping[`${pSkuLower}_${pNameLower}`] || gsheetMapping[pSkuLower];
 
         if (locatorsEntries.length > 0) {
           locatorsEntries.forEach(([locId, data]: [string, any]) => {
@@ -75,7 +141,8 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                 uom: p.uom || 'PCS',
               });
               
-              initialInputs[uniqueId] = data.physicalQty.toString();
+              // Set Stock Rill mengambil dari kolom 'Stock Sistem' GSheet jika berhasil dicocokkan
+              initialInputs[uniqueId] = matchedGsheetValue !== undefined ? matchedGsheetValue : data.physicalQty.toString();
             }
           });
         } else {
@@ -89,7 +156,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
             systemStock: 0,
             uom: p.uom || 'PCS',
           });
-          initialInputs[uniqueId] = '0';
+          initialInputs[uniqueId] = matchedGsheetValue !== undefined ? matchedGsheetValue : '0';
         }
       });
 
@@ -141,13 +208,12 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
   };
 
   const handleExportExcel = () => {
-    const headers = ['Kode SKU', 'Nama Barang', 'Kategori', 'Posisi Rak', 'Stock Sistem', 'Stock Rill (Fisik)', 'Selisih', 'UOM'];
+    const headers = ['Kode SKU', 'Nama Barang', 'Kategori', 'Posisi Rak', 'Stock Sistem App', 'Stock Rill (GSheet)', 'Selisih', 'UOM'];
     
     const rows = stockItems.map(item => {
       const realStockValue = parseFloat(realStockInputs[item.id]) || 0;
       const difference = item.systemStock - realStockValue;
       
-      // Menambahkan quote untuk menghindari masalah delimiter koma pada nama barang
       return [
         `"${item.sku}"`,
         `"${item.name}"`,
@@ -208,7 +274,6 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
     return item.systemStock - (parseFloat(realStockValue) || 0) !== 0;
   }).length;
 
-  // Pagination diaplikasikan ke GRUP (SKU), bukan individual item
   const totalHistoryPages = Math.ceil(groupedItems.length / historyPageSize) || 1;
   const currentGroupedData = groupedItems.slice((historyCurrentPage - 1) * historyPageSize, historyCurrentPage * historyPageSize);
 
@@ -223,7 +288,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
               Stock Balance & Keseimbangan Gudang
             </h2>
             <p className="text-slate-500 mt-1.5 text-[13px]">
-              Perbandingan Stock Sistem (spreadsheet) dengan hasil penghitungan fisik (Stock Rill) di setiap slot rak.
+              Perbandingan Stock Sistem dengan data penghitungan fisik GSheet (Stock Rill) di setiap slot rak.
             </p>
           </div>
           <div className="flex gap-2 items-center flex-wrap">
@@ -250,7 +315,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
             <button 
               onClick={fetchStockData}
               className="p-2 hover:bg-slate-100 rounded-lg border border-slate-200 bg-white transition-colors flex items-center gap-1.5 text-xs font-semibold text-slate-600"
-              title="Refresh Data"
+              title="Refresh Data & Sync Gsheet"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
               Sync Gsheet
@@ -280,7 +345,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">DESKRIPSI NAMA</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KATEGORI</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">STOCK SISTEM</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-40 text-center">STOCK RILL (FISIK)</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-40 text-center">STOCK RILL (GSHEET)</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">SELISIH</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">STATUS / AKSI</th>
               </tr>
@@ -296,7 +361,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
 
                 return (
                   <React.Fragment key={group.sku}>
-                    {/* BARIS PARENT (SKU) */}
+                    {/* BARIS PARENT (SKU GABUNGAN) */}
                     <tr 
                       onClick={() => toggleRow(group.sku)}
                       className={`cursor-pointer transition-colors border-b-2 border-slate-100 ${
@@ -323,7 +388,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                       <td className="px-6 py-4 text-center">
                         {groupHasDiscrepancy ? (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 border border-amber-200">
-                            <AlertTriangle className="w-3 h-3" /> Cek Detail Rak
+                            <AlertTriangle className="w-3 h-3" /> Selisih Rak
                           </span>
                         ) : (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-700 border border-emerald-200">
@@ -333,7 +398,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                       </td>
                     </tr>
 
-                    {/* BARIS CHILD (DETAIL RAK LOKASI) */}
+                    {/* BARIS CHILD (DETAIL POSISI RAK KETIKA DIKLIK) */}
                     {isExpanded && group.items.map((item) => {
                       const realStockValue = realStockInputs[item.id] || '0';
                       const realStockNum = parseFloat(realStockValue) || 0;
@@ -346,7 +411,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                             <span className="w-2 h-2 rounded-full bg-slate-300"></span>
                             Rak: <span className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs text-slate-700">{item.locatorId}</span>
                           </td>
-                          <td className="px-6 py-3 text-xs text-slate-400 italic" colSpan={2}>Detail Fisik Per Lokasi</td>
+                          <td className="px-6 py-3 text-xs text-slate-400 italic" colSpan={2}>Alokasi Stok Fisik Rak</td>
                           <td className="px-6 py-3 text-sm font-semibold font-mono text-slate-500 text-right">{item.systemStock} {item.uom}</td>
                           <td className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
@@ -373,7 +438,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                                   ? 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100' 
                                   : 'bg-slate-100 border-slate-200 text-slate-300 cursor-not-allowed opacity-60'
                               }`}
-                              title="Simpan Penyeimbangan Rak"
+                              title="Simpan Penyeimbangan"
                             >
                               <Save className="w-3.5 h-3.5" />
                             </button>
@@ -414,7 +479,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                   </td>
                   <td className="px-6 py-4 text-center">
                     {totalDiscrepancies > 0 ? (
-                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[10px] font-extrabold uppercase tracking-wide bg-amber-200 text-amber-900 border border-amber-300 shadow-sm animate-pulse">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[10px] font-extrabold uppercase tracking-wide bg-amber-200 text-amber-900 border border-amber-300 shadow-sm">
                         <AlertTriangle className="w-3 h-3" /> {totalDiscrepancies} Rak Selisih
                       </span>
                     ) : (
