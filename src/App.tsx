@@ -8,7 +8,8 @@ import { Layout } from './components/Layout';
 import { seedDatabase } from './lib/db';
 import { getCurrentUser, logoutUser } from './lib/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
-import { db } from './firebase';
+import { auth, db } from './firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 
 // Lazy loading components to optimize performance limit JS initial payload
 const Dashboard = lazy(() => import('./components/Dashboard').then(module => ({ default: module.Dashboard })));
@@ -26,8 +27,27 @@ export default function App() {
   const [user, setUser] = useState<{username: string, role: string, name: string, sessionId?: string} | null>(null);
 
   useEffect(() => {
-    setUser(getCurrentUser());
-    seedDatabase().then(() => setInit(true)).catch(() => setInit(true));
+    // 1. Ambil cached user dari localStorage untuk respon cepat di awal
+    const cachedUser = getCurrentUser();
+    setUser(cachedUser);
+
+    // 2. Dengarkan status otentikasi Firebase secara asinkron sebelum menjalankan seeding database
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          await seedDatabase();
+        } catch (err) {
+          console.warn("Penyemaian database opsional (non-blocking) info:", err);
+        }
+        setInit(true);
+      } else {
+        // Jika tidak ada user masuk di Firebase, kosongkan session dan tampilkan login
+        setUser(null);
+        setInit(true);
+      }
+    });
+
+    return () => unsubscribe();
   }, []);
 
   // Monitor concurrent login
