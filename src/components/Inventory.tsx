@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Upload, Download, Edit2, Trash2, X, Save, AlertCircle, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { Product, ZoneCategory, Locator } from '../types';
-import { getProducts, addProduct, updateProduct, deleteProduct as deleteProductFromDb, addProductsBatch, getTransactions, getInventoryDetails, getLocators, addProductWithStock, addProductsBatchWithStock } from '../lib/db';
+import { Product, ZoneCategory, Locator, Transaction } from '../types';
+import { getProducts, addProduct, updateProduct, deleteProduct as deleteProductFromDb, addProductsBatch, getTransactions, getInventoryDetails, getLocators, addProductWithStock, addProductsBatchWithStock, addTransaction } from '../lib/db';
 import { getCurrentUser } from '../lib/auth'; // Mengambil fungsi auth
+import { v4 as uuidv4 } from 'uuid';
 
 export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -15,6 +16,11 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   const [initialLocatorId, setInitialLocatorId] = useState<string>('');
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('');
+
+  const [editLocStocks, setEditLocStocks] = useState<{ [locId: string]: number }>({});
+  const [previousLocStocks, setPreviousLocStocks] = useState<{ [locId: string]: number }>({});
+  const [newLocId, setNewLocId] = useState<string>('');
+  const [newLocQty, setNewLocQty] = useState<string>('');
 
   // Ambil data user aktif dan validasi hak akses khusus (Super Admin & Kepala Gudang JKT)
   const currentUser = getCurrentUser();
@@ -105,6 +111,62 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
           return;
         }
         await updateProduct(editingProduct.sku, formData);
+
+        // Jika user adalah Super Admin, proses update stok di masing-masing rack unit
+        if (isSuperAdmin) {
+          const productVol = Number(formData.volumeM3) || 0;
+          
+          // 1. Validasi kapasitas dlu untuk semua slot yang diedit
+          for (const [locId, newQty] of Object.entries(editLocStocks)) {
+            const oldQty = previousLocStocks[locId] || 0;
+            const diff = Number(newQty) - Number(oldQty);
+            if (diff > 0) {
+              const targetLoc = locators.find(l => l.id === locId);
+              if (targetLoc) {
+                const currentUsage = locatorUsage[locId] || 0;
+                // Selisih volume yang ditambah:
+                const projectedUsage = currentUsage + (diff * productVol);
+                if (projectedUsage > targetLoc.maxVolumeM3) {
+                  const maxPcsPossible = productVol > 0 ? Math.floor((targetLoc.maxVolumeM3 - (currentUsage - (oldQty * productVol))) / productVol) : 0;
+                  setMessage({
+                    type: 'error',
+                    text: `Gagal Menyimpan! Kapasitas Rak Slot "${locId}" tidak cukup untuk penambahan stok.\n` +
+                          `Sisa Kapasitas Maksimal: ${(targetLoc.maxVolumeM3 - (currentUsage - (oldQty * productVol))).toFixed(4)} m³.\n` +
+                          `👉 Rak ini hanya dapat menampung maksimal ${maxPcsPossible} PCS produk ini.`
+                  });
+                  return;
+                }
+              }
+            }
+          }
+
+          // 2. Jika validasi lolos, buat transaksi adjustment untuk locator yang berubah
+          const operatorName = currentUser?.name || 'SUPER ADMIN';
+          
+          // Gabungkan keys lama dan baru
+          const allLocs = Array.from(new Set([...Object.keys(previousLocStocks), ...Object.keys(editLocStocks)]));
+          for (const locId of allLocs) {
+            const oldQty = previousLocStocks[locId] || 0;
+            const newQty = editLocStocks[locId] || 0;
+            const diff = Number(newQty) - Number(oldQty);
+            
+            if (diff !== 0) {
+              const txId = uuidv4();
+              const newTx: Transaction = {
+                id: txId,
+                type: diff > 0 ? 'INBOUND' : 'OUTBOUND',
+                sku: editingProduct.sku,
+                qty: Math.abs(diff),
+                locatorId: locId,
+                operator: operatorName,
+                timestamp: new Date().toISOString(),
+                status: 'CONFIRMED',
+                memo: `Super Admin Stock Manual Adjustment (dari ${oldQty} ke ${newQty})`
+              };
+              await addTransaction(newTx);
+            }
+          }
+        }
       } else {
         const qty = initialQty === '' ? 0 : initialQty;
         if (qty > 0) {
@@ -183,7 +245,39 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
     setFormData(product);
     setShowForm(true);
     setMessage(null);
+
+    // Inisialisasi stok rak untuk diedit (hanya jika Super Admin)
+    const currentLocs: Record<string, number> = {};
+    const invData = inventoryDetails[product.sku];
+    if (invData && invData.locators) {
+      Object.entries(invData.locators).forEach(([locId, data]: [string, any]) => {
+        if (data.physicalQty > 0) {
+          currentLocs[locId] = data.physicalQty;
+        }
+      });
+    }
+    setEditLocStocks(currentLocs);
+    setPreviousLocStocks(currentLocs);
+    setNewLocId('');
+    setNewLocQty('');
+
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleAddEditLoc = () => {
+    if (!newLocId) {
+      setMessage({ type: 'error', text: 'Pilih slot rak terlebih dahulu.' });
+      return;
+    }
+    const qty = parseInt(newLocQty, 10);
+    if (isNaN(qty) || qty <= 0) {
+      setMessage({ type: 'error', text: 'Jumlah quantity harus lebih besar dari 0.' });
+      return;
+    }
+    setEditLocStocks({ ...editLocStocks, [newLocId]: qty });
+    setNewLocId('');
+    setNewLocQty('');
+    setMessage(null);
   };
 
   const downloadTemplate = () => {
@@ -507,6 +601,135 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
               </>
             )}
           </div>
+          
+          {editingProduct && isSuperAdmin && (
+            <div className="col-span-12 border-t border-slate-100 pt-5 mt-4">
+              <h4 className="text-xs font-black text-[#24549A] uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                <span className="w-1.5 h-3.5 bg-[#24549A] block rounded-full"></span>
+                Super Admin Area: Atur Kuantitas Stok per Rak Slot
+              </h4>
+              
+              {/* Tabel Lokasi Rak Aktif */}
+              <div className="mb-4 overflow-x-auto border border-slate-100 rounded-lg shadow-sm">
+                <table className="min-w-full divide-y divide-slate-100 text-left">
+                  <thead className="bg-[#f8fafc]">
+                    <tr>
+                      <th className="px-4 py-2.5 text-xs font-bold text-slate-500 uppercase tracking-wider">Slot Rak</th>
+                      <th className="px-4 py-2.5 text-xs font-bold text-slate-500 uppercase tracking-wider">Tipe Zona</th>
+                      <th className="px-4 py-2.5 text-xs font-bold text-slate-500 uppercase tracking-wider">Sisa Kapasitas</th>
+                      <th className="px-4 py-2.5 text-xs font-bold text-slate-500 uppercase tracking-wider w-48">Jumlah On-Hand (Pcs)</th>
+                      <th className="px-4 py-2.5 text-xs font-bold text-slate-500 uppercase tracking-wider text-center w-20">Aksi</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {Object.keys(editLocStocks).length === 0 ? (
+                      <tr>
+                        <td colSpan={5} className="px-4 py-4 text-center text-xs text-slate-400 italic font-medium">
+                          Barang ini belum diletakkan di rak mana pun. Gunakan form di bawah untuk mendaftarkan lokasi baru.
+                        </td>
+                      </tr>
+                    ) : (
+                      Object.entries(editLocStocks).map(([locId, qty]) => {
+                        const targetLoc = locators.find(l => l.id === locId);
+                        const currentUsage = locatorUsage[locId] || 0;
+                        const originalSkuQty = previousLocStocks[locId] || 0;
+                        // Sisa kapasitas setelah mengeluarkan volume produk ini sebelumnya
+                        const baseUsage = Math.max(0, currentUsage - (originalSkuQty * (Number(formData.volumeM3) || 0)));
+                        const remainingCapacity = targetLoc ? Math.max(0, targetLoc.maxVolumeM3 - baseUsage) : 0;
+
+                        return (
+                          <tr key={locId} className="hover:bg-slate-50/40">
+                            <td className="px-4 py-3 text-xs font-bold text-slate-800 font-mono">{locId}</td>
+                            <td className="px-4 py-3 text-xs text-slate-500 font-medium">
+                              {targetLoc ? (targetLoc.zone === 'DEFAULT' ? 'BUFFER' : targetLoc.zone.replace('FG_', '')) : '---'}
+                            </td>
+                            <td className="px-4 py-3 text-xs font-bold text-slate-600 font-mono">
+                              {remainingCapacity.toFixed(4)} m³
+                            </td>
+                            <td className="px-4 py-3">
+                              <input
+                                type="number"
+                                min="0"
+                                value={qty || ''}
+                                onChange={e => {
+                                  const val = parseInt(e.target.value, 10);
+                                  if (!isNaN(val) && val >= 0) {
+                                    setEditLocStocks({ ...editLocStocks, [locId]: val });
+                                  } else if (e.target.value === '') {
+                                    setEditLocStocks({ ...editLocStocks, [locId]: 0 });
+                                  }
+                                }}
+                                className="w-28 p-1.5 border border-slate-200 rounded font-bold font-mono text-xs focus:ring-1 focus:ring-blue-500 bg-slate-50 outline-none"
+                              />
+                            </td>
+                            <td className="px-4 py-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const next = { ...editLocStocks };
+                                  delete next[locId];
+                                  setEditLocStocks(next);
+                                }}
+                                className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md transition-all"
+                                title="Kosongkan slot"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              
+              {/* Form Tambah Lokasi Rak Baru */}
+              <div className="bg-[#f8fafc] border border-slate-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-end gap-3 max-w-2xl mt-4">
+                <div className="flex-1">
+                  <label className="block text-[10px] uppercase font-bold text-[#24549A] mb-1">Pilih Slot Baru</label>
+                  <select
+                    value={newLocId}
+                    onChange={e => setNewLocId(e.target.value)}
+                    className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-bold font-mono text-slate-700 outline-none"
+                  >
+                    <option value="">-- Cari Slot Baru --</option>
+                    {locators
+                      .filter(l => l.zone === formData.category || l.rack.startsWith('FL'))
+                      .filter(l => !editLocStocks.hasOwnProperty(l.id))
+                      .sort((a,b) => a.id.localeCompare(b.id, undefined, {numeric: true, sensitivity: 'base'}))
+                      .map(l => {
+                        const currentUsage = locatorUsage[l.id] || 0;
+                        const remVol = l.maxVolumeM3 - currentUsage;
+                        return (
+                          <option key={l.id} value={l.id}>
+                            {l.id} [{l.rack}] ({l.zone === 'DEFAULT' ? 'BUFFER' : l.zone.replace('FG_', '')}) - Sisa: {remVol.toFixed(3)} m³
+                          </option>
+                        );
+                      })}
+                  </select>
+                </div>
+                <div className="w-32">
+                  <label className="block text-[10px] uppercase font-bold text-[#24549A] mb-1">Qty Awal</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={newLocQty}
+                    onChange={e => setNewLocQty(e.target.value)}
+                    placeholder="Qty"
+                    className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-bold font-mono text-slate-700 outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleAddEditLoc}
+                  className="bg-[#24549A] text-white hover:bg-blue-800 text-xs font-bold px-4 py-2.5 rounded-lg shadow-sm h-10 flex items-center gap-1 shrink-0 transition-colors"
+                >
+                  <Plus className="w-4 h-4" /> Tambah Posisi
+                </button>
+              </div>
+            </div>
+          )}
           
           <div className="mt-6 flex justify-end gap-3">
             <button 
