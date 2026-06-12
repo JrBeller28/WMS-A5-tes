@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Building2, 
   LayoutDashboard, 
@@ -42,7 +42,7 @@ export function Layout({
   const user = getCurrentUser();
   
   useEffect(() => {
-    const q = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(5));
+    const q = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(15));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const txs: Transaction[] = [];
       snapshot.forEach((doc) => {
@@ -52,6 +52,47 @@ export function Layout({
     });
     return () => unsubscribe();
   }, []);
+
+  // Membagi transaksi realtime berdasarkan hari
+  const groupedTransactions = useMemo(() => {
+    const groups: { dateLabel: string; items: Transaction[] }[] = [];
+    const absoluteGroups: Record<string, Transaction[]> = {};
+
+    recentTransactions.forEach((tx) => {
+      if (!tx.timestamp) return;
+      const dateObj = new Date(tx.timestamp);
+      
+      const dateLabel = dateObj.toLocaleDateString('id-ID', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric'
+      });
+
+      if (!absoluteGroups[dateLabel]) {
+        absoluteGroups[dateLabel] = [];
+      }
+      absoluteGroups[dateLabel].push(tx);
+    });
+
+    Object.keys(absoluteGroups).forEach((label) => {
+      groups.push({
+        dateLabel: label,
+        items: absoluteGroups[label]
+      });
+    });
+
+    return groups;
+  }, [recentTransactions]);
+
+  const formatTime = (isoString?: string) => {
+    if (!isoString) return '';
+    return new Date(isoString).toLocaleTimeString('id-ID', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+  };
 
   // Fallback state lokal jika App.tsx belum melemparkan state search global (menghindari error)
   const [localSearch, setLocalSearch] = useState('');
@@ -195,36 +236,63 @@ export function Layout({
             </button>
 
             {notificationsOpen && (
-              <div className="absolute right-0 top-12 w-80 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden z-50">
-                <div className="p-3 border-b border-slate-100 bg-slate-50 flex justify-between items-center">
-                  <h3 className="text-sm font-bold text-slate-700">Realtime Updates</h3>
-                  <span className="text-xs text-slate-500">{recentTransactions.length} recent</span>
+              <div className="absolute right-0 top-12 w-96 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden z-50 animate-in fade-in-50 slide-in-from-top-2 duration-150">
+                <div className="p-4 border-b border-slate-100 bg-slate-50/80 backdrop-blur-sm flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <Bell className="w-4 h-4 text-blue-600" />
+                    <h3 className="text-sm font-bold text-slate-800">Realtime Updates Ledger</h3>
+                  </div>
+                  <span className="text-xs font-semibold px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full">
+                    {recentTransactions.length} update
+                  </span>
                 </div>
-                <div className="max-h-[300px] overflow-y-auto">
-                  {recentTransactions.length === 0 ? (
-                    <div className="p-4 text-center text-sm text-slate-500">No recent updates</div>
+                <div className="max-h-[380px] overflow-y-auto divide-y divide-slate-100">
+                  {groupedTransactions.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-slate-500">Belum ada update aktivitas terbaru</div>
                   ) : (
-                    <div className="flex flex-col divide-y divide-slate-100">
-                      {recentTransactions.map((tx) => (
-                        <div key={tx.id} className="p-3 hover:bg-slate-50 transition-colors">
-                          <div className="flex items-start gap-2">
-                            {tx.type === 'INBOUND' ? (
-                              <LogIn className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                            ) : (
-                              <LogOut className="w-4 h-4 text-orange-500 mt-0.5 shrink-0" />
-                            )}
-                            <div>
-                              <p className="text-xs font-semibold text-slate-800">
-                                {tx.type} • {tx.sku}
-                              </p>
-                              <p className="text-[11px] text-slate-500 mt-0.5">
-                                Qty: {tx.qty} at {tx.locatorId || 'Bin'}
-                              </p>
-                            </div>
-                          </div>
+                    groupedTransactions.map((group) => (
+                      <div key={group.dateLabel} className="bg-white">
+                        {/* Day Header */}
+                        <div className="sticky top-0 bg-slate-100 px-4 py-1.5 text-[11px] font-bold text-slate-600 border-b border-slate-200 flex justify-between">
+                          <span>{group.dateLabel}</span>
+                          <span className="text-slate-400 font-medium">({group.items.length} aktivitas)</span>
                         </div>
-                      ))}
-                    </div>
+                        {/* Day Items */}
+                        <div className="flex flex-col divide-y divide-slate-50">
+                          {group.items.map((tx) => (
+                            <div key={tx.id} className="p-3.5 hover:bg-slate-50/50 transition-colors">
+                              <div className="flex items-start gap-3">
+                                <div className="mt-0.5">
+                                  {tx.type === 'INBOUND' ? (
+                                    <div className="p-1 px-1.5 bg-emerald-50 rounded text-emerald-600 font-bold text-[10px]">IN</div>
+                                  ) : (
+                                    <div className="p-1 px-1.5 bg-orange-50 rounded text-orange-600 font-bold text-[10px]">OUT</div>
+                                  )}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center justify-between gap-1">
+                                    <p className="text-xs font-bold text-slate-800 truncate">
+                                      {tx.sku}
+                                    </p>
+                                    <span className="text-[10px] font-medium text-slate-400 shrink-0">
+                                      {formatTime(tx.timestamp)}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-500 mt-1">
+                                    Jumlah: <span className="font-bold text-slate-700">{Math.abs(tx.qty)}</span> di <span className="font-bold text-slate-700">{tx.locatorId || 'Buffer/Bin'}</span>
+                                  </p>
+                                  {/* Operator Info */}
+                                  <div className="flex items-center gap-1 mt-1.5 text-[10px] text-slate-400 bg-slate-50 rounded px-2 py-1 inline-flex max-w-full">
+                                    <span className="font-bold text-slate-500 shrink-0">Operator:</span>
+                                    <span className="truncate text-slate-600 font-semibold">{tx.operator || 'System'}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))
                   )}
                 </div>
               </div>
