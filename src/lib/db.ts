@@ -25,6 +25,29 @@ export const addProduct = async (product: Product) => {
   await setDoc(doc(db, 'products', product.sku), product);
 };
 
+export const addProductWithStock = async (product: Product, qty: number, locatorId: string, operator: string) => {
+  const batch = writeBatch(db);
+  const productRef = doc(db, 'products', product.sku);
+  batch.set(productRef, product);
+
+  if (qty > 0 && locatorId) {
+    const txId = uuidv4();
+    const txRef = doc(db, 'transactions', txId);
+    batch.set(txRef, {
+      id: txId,
+      type: 'INBOUND',
+      sku: product.sku,
+      qty: qty,
+      locatorId: locatorId,
+      operator: operator || 'System',
+      timestamp: new Date().toISOString(),
+      status: 'CONFIRMED',
+      memo: 'Initial On-Hand Stock Setup'
+    });
+  }
+  await batch.commit();
+};
+
 export const updateProduct = async (sku: string, data: Partial<Product>) => {
   await updateDoc(doc(db, 'products', sku), data as any);
 };
@@ -38,6 +61,34 @@ export const addProductsBatch = async (products: Product[]) => {
   for (const p of products) {
     const ref = doc(db, 'products', p.sku);
     batch.set(ref, p, { merge: true });
+  }
+  await batch.commit();
+};
+
+export const addProductsBatchWithStock = async (
+  items: { product: Product; qty?: number; locatorId?: string }[],
+  operator: string
+) => {
+  const batch = writeBatch(db);
+  for (const item of items) {
+    const productRef = doc(db, 'products', item.product.sku);
+    batch.set(productRef, item.product, { merge: true });
+
+    if (item.qty && item.qty > 0 && item.locatorId) {
+      const txId = uuidv4();
+      const txRef = doc(db, 'transactions', txId);
+      batch.set(txRef, {
+        id: txId,
+        type: 'INBOUND',
+        sku: item.product.sku,
+        qty: item.qty,
+        locatorId: item.locatorId,
+        operator: operator || 'System',
+        timestamp: new Date().toISOString(),
+        status: 'CONFIRMED',
+        memo: 'CSV Import Stock Setup'
+      });
+    }
   }
   await batch.commit();
 };
