@@ -1,15 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Upload, Download, Edit2, Trash2, X, Save, AlertCircle, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { Product, ZoneCategory } from '../types';
-import { getProducts, addProduct, updateProduct, deleteProduct as deleteProductFromDb, addProductsBatch, getTransactions, getInventoryDetails } from '../lib/db';
+import { Product, ZoneCategory, Locator } from '../types';
+import { getProducts, addProduct, updateProduct, deleteProduct as deleteProductFromDb, addProductsBatch, getTransactions, getInventoryDetails, getLocators, addProductWithStock, addProductsBatchWithStock } from '../lib/db';
 import { getCurrentUser } from '../lib/auth'; // Mengambil fungsi auth
 
 export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [inventoryDetails, setInventoryDetails] = useState<Record<string, any>>({});
+  const [locators, setLocators] = useState<Locator[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [formData, setFormData] = useState<Partial<Product>>({ sku: '', name: '', category: 'FG_PLUMBING', volumeM3: 0, uom: 'PCS' });
+  const [initialQty, setInitialQty] = useState<number | ''>('');
+  const [initialLocatorId, setInitialLocatorId] = useState<string>('');
   const [message, setMessage] = useState<{type: 'success' | 'error', text: string} | null>(null);
   const [categoryFilter, setCategoryFilter] = useState('');
 
@@ -23,19 +26,49 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   // Menggabungkan izin untuk melihat & mengeksekusi menu AKSI
   const hasActionAccess = isSuperAdmin || isKepalaGudangJkt;
 
+  const [transactions, setTransactions] = useState<any[]>([]);
+
   const fetchProducts = () => {
     Promise.all([
       getProducts(),
-      getInventoryDetails()
-    ]).then(([prods, inv]) => {
+      getInventoryDetails(),
+      getLocators(),
+      getTransactions()
+    ]).then(([prods, inv, locs, txs]) => {
       setProducts(prods);
       setInventoryDetails(inv);
+      setLocators(locs);
+      setTransactions(txs);
     }).catch(console.error);
   };
 
   useEffect(() => {
     fetchProducts();
   }, []);
+
+  // Menghitung volume terpakai di setiap locator saat ini
+  const locatorUsage = React.useMemo(() => {
+    const usages: Record<string, number> = {};
+    locators.forEach(l => {
+      usages[l.id] = 0;
+    });
+
+    transactions.forEach(tx => {
+      if (tx.status === 'CANCELLED' || tx.status === 'PENDING') return;
+      if (usages[tx.locatorId] !== undefined) {
+        const p = products.find(x => x.sku === tx.sku);
+        if (p) {
+          if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {
+            usages[tx.locatorId] += (tx.qty * p.volumeM3);
+          } else if (tx.type === 'OUTBOUND' && (tx.status === 'CONFIRMED' || tx.status === 'BOOKED')) {
+            usages[tx.locatorId] += (tx.qty * p.volumeM3);
+          }
+        }
+      }
+    });
+
+    return usages;
+  }, [locators, transactions, products]);
 
   // Logika penyaringan gabungan (Filter Kategori Dropdown + Live Global Search Bar)
   const filteredProducts = products.filter(p => {
@@ -73,12 +106,49 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
         }
         await updateProduct(editingProduct.sku, formData);
       } else {
-        await addProduct(formData as Product);
+        const qty = initialQty === '' ? 0 : initialQty;
+        if (qty > 0) {
+          if (!initialLocatorId) {
+            setMessage({ type: 'error', text: 'Posisi Rak (Slot) wajib diisi apabila Jumlah On Hand diisi.' });
+            return;
+          }
+          const targetLoc = locators.find(l => l.id === initialLocatorId);
+          if (!targetLoc) {
+            setMessage({ type: 'error', text: `Posisi Rak Slot "${initialLocatorId}" tidak valid.` });
+            return;
+          }
+          if (targetLoc.zone !== formData.category && !targetLoc.rack.startsWith('FL')) {
+            setMessage({ type: 'error', text: `Posisi Rak (Slot) ${initialLocatorId} tidak sesuai dengan Kategori Zona (${formData.category}).` });
+            return;
+          }
+
+          // Validasi Kapasitas Tersedia sesuai volume
+          const currentUsage = locatorUsage[initialLocatorId] || 0;
+          const remainingVol = targetLoc.maxVolumeM3 - currentUsage;
+          const productVol = Number(formData.volumeM3) || 0;
+          const requiredVol = qty * productVol;
+          if (requiredVol > remainingVol) {
+            const maxPcsPossible = productVol > 0 ? Math.floor(remainingVol / productVol) : 0;
+            setMessage({ 
+              type: 'error', 
+              text: `Produk "${formData.sku}" Gagal Ditambahkan!\nVolume Rak pada Slot "${initialLocatorId}" sudah penuh / tidak cukup.\n\n` +
+                    `• Sisa Kapasitas Rak: ${remainingVol.toFixed(4)} m³\n` +
+                    `• Volume yang Dibutuhkan untuk ${qty} Unit: ${requiredVol.toFixed(4)} m³\n\n` +
+                    `👉 Rak ini hanya dapat menampung maksimal ${maxPcsPossible} PCS produk ini.`
+            });
+            return;
+          }
+        }
+        
+        const operatorName = currentUser?.name || 'SYSTEM';
+        await addProductWithStock(formData as Product, qty, initialLocatorId, operatorName);
       }
       setMessage({ type: 'success', text: `Product ${editingProduct ? 'updated' : 'added'} successfully.` });
       setShowForm(false);
       setEditingProduct(null);
       setFormData({ sku: '', name: '', category: 'FG_PLUMBING', volumeM3: 0, uom: 'PCS' });
+      setInitialQty('');
+      setInitialLocatorId('');
       fetchProducts();
     } catch (e) {
       setMessage({ type: 'error', text: 'Network error.' });
@@ -117,10 +187,10 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   };
 
   const downloadTemplate = () => {
-    const csvContent = "data:text/csv;charset=utf-8,sku,name,category,volumeM3,uom\n" +
-                       "P-PLUMB-001,Pipa PVC 2 Inch,FG_PLUMBING,0.015,PCS\n" +
-                       "S-SMART-002,Water Flow Meter Digital,FG_SMART_WATER,0.008,BOX\n" +
-                       "F-FIT-003,Sock Drat Dalam 1/2,FG_FITTING,0.002,PCS";
+    const csvContent = "data:text/csv;charset=utf-8,sku,name,category,volumeM3,uom,onHandQty,locatorId\n" +
+                       "P-PLUMB-001,Pipa PVC 2 Inch,FG_PLUMBING,0.015,PCS,10,A1.1\n" +
+                       "S-SMART-002,Water Flow Meter Digital,FG_SMART_WATER,0.008,BOX,5,B1.1\n" +
+                       "F-FIT-003,Sock Drat Dalam 1/2,FG_FITTING,0.002,PCS,20,C1.1";
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -144,42 +214,91 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
     reader.onload = async (evt) => {
       const text = evt.target?.result as string;
       const lines = text.split('\n');
-      const productsToImport: Partial<Product>[] = [];
+      const itemsToImport: { product: Product; qty?: number; locatorId?: string }[] = [];
+      const skippedRows: string[] = [];
+      const runningUsage = { ...locatorUsage };
 
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
-        const [sku, name, category, volumeM3, uom] = line.split(',');
+        const [sku, name, category, volumeM3, uom, onHandQtyVal, locatorIdVal] = line.split(',');
         if (sku && name && category && volumeM3) {
-          productsToImport.push({
-            sku: sku.trim().toUpperCase(),
-            name: name.trim(),
-            category: category.trim() as ZoneCategory,
-            volumeM3: parseFloat(volumeM3.trim()),
-            uom: uom ? uom.trim().toUpperCase() : 'PCS'
-          });
+          const skuClean = sku.trim().toUpperCase();
+          const pCategory = category.trim() as ZoneCategory;
+          const qty = onHandQtyVal ? parseInt(onHandQtyVal.trim(), 10) : 0;
+          const locId = locatorIdVal ? locatorIdVal.trim().toUpperCase() : '';
+
+          let isValidLoc = true;
+          if (qty > 0 && locId) {
+            const matchedLoc = locators.find(l => l.id === locId);
+            if (!matchedLoc) {
+              isValidLoc = false;
+              skippedRows.push(`Baris ${i + 1} (${skuClean}): Slot "${locId}" tidak terdaftar`);
+            } else if (matchedLoc.zone !== pCategory && !matchedLoc.rack.startsWith('FL')) {
+              isValidLoc = false;
+              skippedRows.push(`Baris ${i + 1} (${skuClean}): Slot "${locId}" di zona ${matchedLoc.zone} tidak sesuai dengan produk (${pCategory})`);
+            } else {
+              // Validasi kapasitas rak slot berdasarkan akumulasi volume
+              const productVol = parseFloat(volumeM3.trim()) || 0;
+              const requiredVol = qty * productVol;
+              const currentUsage = runningUsage[locId] || 0;
+              const remainingVol = matchedLoc.maxVolumeM3 - currentUsage;
+
+              if (requiredVol > remainingVol) {
+                isValidLoc = false;
+                const maxPcsPossible = productVol > 0 ? Math.floor(remainingVol / productVol) : 0;
+                skippedRows.push(`Baris ${i + 1} (SKU: ${skuClean}) ❌ Gagal ke Slot "${locId}": Kapasitas tidak cukup (Sisa: ${remainingVol.toFixed(4)} m³, Butuh: ${requiredVol.toFixed(4)} m³).\n   👉 Slot ini hanya muat maksimal ${maxPcsPossible} PCS produk ini.`);
+              } else {
+                runningUsage[locId] = currentUsage + requiredVol;
+              }
+            }
+          }
+
+          if (isValidLoc) {
+            itemsToImport.push({
+              product: {
+                sku: skuClean,
+                name: name.trim(),
+                category: pCategory,
+                volumeM3: parseFloat(volumeM3.trim()),
+                uom: uom ? uom.trim().toUpperCase() : 'PCS'
+              },
+              qty: qty > 0 ? qty : undefined,
+              locatorId: locId || undefined
+            });
+          }
         }
       }
 
-      if (productsToImport.length > 0) {
+      if (itemsToImport.length > 0) {
         try {
           const existSkus = new Set(products.map(p => p.sku));
-          const newProducts = productsToImport.filter(p => p.sku && !existSkus.has(p.sku)) as Product[];
+          const newItems = itemsToImport.filter(item => item.product.sku && !existSkus.has(item.product.sku));
           
-          if (newProducts.length > 0) {
-              await addProductsBatch(newProducts);
+          if (newItems.length > 0) {
+              const operatorName = currentUser?.name || 'SYSTEM';
+              await addProductsBatchWithStock(newItems, operatorName);
+          }
+          
+          let alertText = `Berhasil mengimpor data: ${newItems.length} SKU baru ditambahkan (termasuk stok on-hand jika ada). ${itemsToImport.length - newItems.length} SKU dilewati karena duplikat.`;
+          if (skippedRows.length > 0) {
+            alertText += `\n\nDetail Baris yang Dilompati / Gagal:\n` + skippedRows.join('\n');
           }
           
           setMessage({ 
-            type: 'success', 
-            text: `Berhasil mengimpor data: ${newProducts.length} SKU baru ditambahkan, ${productsToImport.length - newProducts.length} SKU dilewati karena duplikat.` 
+            type: skippedRows.length > 0 ? 'error' : 'success', 
+            text: alertText 
           });
           fetchProducts();
         } catch (err) {
           setMessage({ type: 'error', text: 'Gagal mengimpor produk ke database.' });
         }
       } else {
-        setMessage({ type: 'error', text: 'Tidak ada data produk valid yang ditemukan di dalam CSV.' });
+        let alertText = 'Tidak ada produk baru atau baris valid yang berhasil diproses.';
+        if (skippedRows.length > 0) {
+          alertText += `\n\nDetail Kegagalan:\n` + skippedRows.join('\n');
+        }
+        setMessage({ type: 'error', text: alertText });
       }
       e.target.value = '';
     };
@@ -195,6 +314,8 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
             if (!showForm || editingProduct) {
               setEditingProduct(null);
               setFormData({ sku: '', name: '', category: 'FG_PLUMBING', volumeM3: '' as any, uom: 'PCS' });
+              setInitialQty('');
+              setInitialLocatorId('');
               setShowForm(true);
             } else {
               setShowForm(false);
@@ -256,10 +377,14 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
       </div>
 
       {message && (
-        <div className={`p-4 rounded-lg flex items-center gap-2 text-sm font-bold ${message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-          <AlertCircle className="w-5 h-5"/>
-          {message.text}
-          <button className="ml-auto" onClick={() => setMessage(null)}><X className="w-4 h-4" /></button>
+        <div className={`p-4 rounded-xl flex items-start gap-3 text-sm font-semibold border ${message.type === 'success' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-rose-50 text-rose-800 border-rose-200'} shadow-sm animate-in fade-in slide-in-from-top-1 duration-150`}>
+          <AlertCircle className={`w-5 h-5 shrink-0 mt-0.5 ${message.type === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}/>
+          <div className="flex-1 whitespace-pre-line leading-relaxed">
+            {message.text}
+          </div>
+          <button type="button" className="text-slate-400 hover:text-slate-600 shrink-0 p-0.5 rounded-lg hover:bg-slate-100 transition-colors ml-2" onClick={() => setMessage(null)}>
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -270,7 +395,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
             <button onClick={() => { setShowForm(false); setEditingProduct(null); }} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+          <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 ${!editingProduct ? 'xl:grid-cols-7' : ''} gap-4`}>
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">SKU</label>
               <input 
@@ -306,6 +431,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
                 <option value="PACKAGING_MATERIALS">Bahan Packing</option>
                 <option value="ASSEMBLY_KIT">Manufacture / Assembly</option>
                 <option value="SPECIFIC_AREA">Spesifik (R9)</option>
+                <option value="RAW_MATERIALS">Raw Materials</option>
               </select>
             </div>
             <div>
@@ -330,11 +456,61 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
                 placeholder="PCS"
               />
             </div>
+
+            {!editingProduct && (
+              <>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider text-slate-800">Jumlah On Hand</label>
+                  <input 
+                    type="number" 
+                    min="1"
+                    value={initialQty === '' ? '' : initialQty} 
+                    onChange={e => setInitialQty(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                    className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 font-mono font-bold text-slate-700"
+                    placeholder="Stok awal (opsional)"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider flex items-center justify-between text-slate-800">
+                    <span>Posisi Rak Slot</span>
+                    <span className="text-[9px] text-blue-600 font-semibold normal-case">Zona / Buffer</span>
+                  </label>
+                  <select
+                    value={initialLocatorId}
+                    disabled={!initialQty}
+                    onChange={e => setInitialLocatorId(e.target.value)}
+                    className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 font-mono text-xs font-bold disabled:opacity-[0.55] disabled:cursor-not-allowed text-slate-700"
+                  >
+                    <option value="">-- Pilih Slot ({formData.category ? formData.category.replace('FG_', '') : 'Semua'}) --</option>
+                    {locators
+                      .filter(l => l.zone === formData.category || l.rack.startsWith('FL'))
+                      .map(l => {
+                        const currentUsage = locatorUsage[l.id] || 0;
+                        const remainingVol = l.maxVolumeM3 - currentUsage;
+                        return { locator: l, remainingVol };
+                      })
+                      .filter(item => {
+                        const productVol = Number(formData.volumeM3) || 0;
+                        const qty = Number(initialQty) || 0;
+                        const requiredVol = productVol * qty;
+                        return item.remainingVol >= requiredVol && item.remainingVol > 0;
+                      })
+                      .sort((a,b) => a.locator.id.localeCompare(b.locator.id, undefined, {numeric: true, sensitivity: 'base'}))
+                      .map(({ locator: l, remainingVol }) => (
+                        <option key={l.id} value={l.id}>
+                          {l.id} [{l.rack}] ({l.zone === 'DEFAULT' ? 'BUFFER' : l.zone.replace('FG_', '')}) - Sisa: {remainingVol.toFixed(3)} m³
+                        </option>
+                      ))
+                    }
+                  </select>
+                </div>
+              </>
+            )}
           </div>
           
           <div className="mt-6 flex justify-end gap-3">
             <button 
-              onClick={() => { setShowForm(false); setEditingProduct(null); }}
+              onClick={() => { setShowForm(false); setEditingProduct(null); setInitialQty(''); setInitialLocatorId(''); }}
               className="px-4 py-2 border border-slate-200 rounded-lg text-slate-600 font-medium hover:bg-slate-50"
             >
               Cancel
