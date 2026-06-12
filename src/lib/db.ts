@@ -359,7 +359,7 @@ export const seedDatabase = async () => {
           { id: uuidv4(), type: 'INBOUND', sku: 'SW-SENS-01', qty: 25, locatorId: 'FL-B2.2', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
           
           { id: uuidv4(), type: 'INBOUND', sku: 'FT-ELBOW-90', qty: 20, locatorId: 'FL-C1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
-          { id: uuidv4(), type: 'INBOUND', sku: 'FT-ELBOW-90', qty: 15, locatorId: 'FL-D1.3', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
+          { id: uuidv4(), type: 'INBOUND', sku: 'FT-ELBOW-90', qty: 15, locatorId: 'FL-D1.2', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
           
           { id: uuidv4(), type: 'INBOUND', sku: 'FL-CARBON', qty: 6, locatorId: 'FL-E1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
           
