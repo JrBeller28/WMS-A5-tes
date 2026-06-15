@@ -6,7 +6,8 @@ export type ZoneCategory =
   | 'PACKAGING_MATERIALS'
   | 'ASSEMBLY_KIT'
   | 'SPECIFIC_AREA'
-  | 'RAW_MATERIALS';
+  | 'RAW_MATERIALS'
+  | 'DEFAULT';
 
 export interface Product {
   sku: string;

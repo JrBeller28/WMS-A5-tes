@@ -21,6 +21,18 @@ export const getLocators = async (): Promise<Locator[]> => {
   return locators;
 };
 
+export const addLocator = async (locator: Locator) => {
+  await setDoc(doc(db, 'locators', locator.id), locator);
+};
+
+export const updateLocator = async (id: string, data: Partial<Locator>) => {
+  await updateDoc(doc(db, 'locators', id), data as any);
+};
+
+export const deleteLocator = async (id: string) => {
+  await deleteDoc(doc(db, 'locators', id));
+};
+
 export const addProduct = async (product: Product) => {
   await setDoc(doc(db, 'products', product.sku), product);
 };
@@ -223,6 +235,38 @@ export const getInventoryDetails = async () => {
     }
   
     return inventory;
+};
+
+export const transferInventory = async (sku: string, fromLocatorId: string, toLocatorId: string, qty: number, operator: string) => {
+  const batch = writeBatch(db);
+  const outTxId = uuidv4();
+  const inTxId = uuidv4();
+
+  batch.set(doc(db, 'transactions', outTxId), {
+    id: outTxId,
+    type: 'OUTBOUND',
+    sku,
+    qty: -qty,
+    locatorId: fromLocatorId,
+    operator: operator || 'System',
+    timestamp: new Date().toISOString(),
+    status: 'CONFIRMED',
+    memo: `Transfer to ${toLocatorId}`
+  });
+
+  batch.set(doc(db, 'transactions', inTxId), {
+    id: inTxId,
+    type: 'INBOUND',
+    sku,
+    qty: qty,
+    locatorId: toLocatorId,
+    operator: operator || 'System',
+    timestamp: new Date().toISOString(),
+    status: 'CONFIRMED',
+    memo: `Transfer from ${fromLocatorId}`
+  });
+
+  await batch.commit();
 };
 
 export const getPutawayRecommendations = async (sku: string, qty: number) => {

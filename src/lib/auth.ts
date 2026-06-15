@@ -11,7 +11,8 @@ export const USERS = [
   { username: 'adminA5', password: 'admin123', role: 'Admin A5', name: 'Iwan Gunawan' },
   { username: 'petugasA5', password: 'petugas123', role: 'Petugas', name: 'Arief Nugroho' },
   { username: 'kasiejkt', password: 'kasiejkt123', role: 'Kepala Gudang JKT', name: 'Moch. Johar Prasojo' },
-  { username: 'admin', password: 'admin123', role: 'Super Admin', name: 'HQ Warehouse' }
+  { username: 'admin', password: 'admin123', role: 'Super Admin', name: 'HQ Warehouse' },
+  { username: 'adji', password: 'adji123', role: 'Developer', name: 'Adji Prasetyo' }
 ];
 
 export const loginUser = async (usernameOrEmail: string, password: string) => {

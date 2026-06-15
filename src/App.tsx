@@ -19,6 +19,9 @@ const Outbound = lazy(() => import('./components/Outbound').then(module => ({ de
 const StockLedger = lazy(() => import('./components/StockLedger').then(module => ({ default: module.StockLedger })));
 const StockBalance = lazy(() => import('./components/StockBalance').then(module => ({ default: module.StockBalance })));
 const Login = lazy(() => import('./components/Login').then(module => ({ default: module.Login })));
+const StaffManagement = lazy(() => import('./components/StaffManagement').then(module => ({ default: module.StaffManagement })));
+const RackManagement = lazy(() => import('./components/RackManagement').then(module => ({ default: module.RackManagement })));
+const MovingRack = lazy(() => import('./components/MovingRack').then(module => ({ default: module.MovingRack })));
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
@@ -116,6 +119,12 @@ export default function App() {
         return <StockLedger globalSearch={searchQuery} />;
       case 'balance': 
         return <StockBalance globalSearch={searchQuery} />;
+      case 'moving':
+        return <MovingRack />;
+      case 'staff':
+        return user?.role === 'Developer' ? <StaffManagement /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
+      case 'rack':
+        return user?.role === 'Developer' ? <RackManagement /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       default: 
         return <Dashboard globalSearch={searchQuery} />;
     }

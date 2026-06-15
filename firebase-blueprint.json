@@ -64,7 +64,7 @@
         "uid": { "type": "string" },
         "username": { "type": "string" },
         "email": { "type": "string" },
-        "role": { "type": "string", "enum": ["Super Admin", "Kepala Gudang JKT", "Admin A5", "Petugas"] },
+        "role": { "type": "string", "enum": ["Developer","Super Admin", "Kepala Gudang JKT", "Admin A5", "Petugas"] },
         "name": { "type": "string" }
       },
       "required": ["uid", "username", "email", "role", "name"]

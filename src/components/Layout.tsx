@@ -11,7 +11,10 @@ import {
   Search,
   Power,
   Scale,
-  ShieldAlert
+  ShieldAlert,
+  UserPlus,
+  Layers,
+  ArrowRightLeft
 } from 'lucide-react';
 import { getCurrentUser, logoutUser } from '../lib/auth';
 import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
@@ -119,6 +122,15 @@ export function Layout({
     { id: 'ledger', label: 'Stock Ledger', icon: History },
     { id: 'balance', label: 'Stock Balance', icon: Scale },
   ];
+
+  if (user && ['Developer', 'Super Admin', 'Admin A5', 'Kepala Gudang JKT'].includes(user.role)) {
+    tabs.splice(4, 0, { id: 'moving', label: 'Moving Rack', icon: ArrowRightLeft });
+  }
+  
+  if (user?.role === 'Developer') {
+    tabs.push({ id: 'staff', label: 'Staff Management', icon: UserPlus });
+    tabs.push({ id: 'rack', label: 'Manajemen Rak', icon: Layers });
+  }
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
