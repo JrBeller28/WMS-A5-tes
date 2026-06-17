@@ -8,7 +8,11 @@ import {
   Scale, 
   ChevronRight, 
   ChevronDown, 
-  Download 
+  Download,
+  Upload,
+  Settings,
+  Link,
+  FileSpreadsheet
 } from 'lucide-react';
 import { Product } from '../types';
 import { getProducts, getInventoryDetails, updateProduct } from '../lib/db'; 
@@ -57,7 +61,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
   const [stockItems, setStockItems] = useState<StockBalanceItem[]>([]);
   const [realStockInputs, setRealStockInputs] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
   
   // State untuk Toggle Accordion per SKU
   const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
@@ -65,6 +69,43 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
   // Pagination State
   const [historyPageSize, setHistoryPageSize] = useState<number>(30);
   const [historyCurrentPage, setHistoryCurrentPage] = useState<number>(1);
+
+  // GSheet URL Configuration & Sync Tracking
+  const [gsheetUrl, setGsheetUrl] = useState<string>(() => {
+    return localStorage.getItem('gsheet_url') || 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSbvA_5FOxi2-nkfz8iJbptOhDfBCLM5LnTwrVLeJ4pf1hlGjSBywsTXQYYtEjuo0DY2M63wcJmc0tP/pub?gid=1541449669&single=true&output=csv';
+  });
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [tempUrl, setTempUrl] = useState(gsheetUrl);
+
+  const [savedMapping, setSavedMapping] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('cached_stock_mapping');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  
+  const [syncStatus, setSyncStatus] = useState<{
+    source: 'system' | 'gsheet' | 'csv';
+    label: string;
+    details?: string;
+  }>(() => {
+    try {
+      const saved = localStorage.getItem('cached_sync_status');
+      return saved ? JSON.parse(saved) : {
+        source: 'system',
+        label: 'Menggunakan Nilai Default Aplikasi',
+        details: 'Belum menyinkronkan data fisik terbaru GSheet.'
+      };
+    } catch {
+      return {
+        source: 'system',
+        label: 'Menggunakan Nilai Default Aplikasi',
+        details: 'Belum menyinkronkan data fisik terbaru GSheet.'
+      };
+    }
+  });
 
   const currentUser = getCurrentUser();
   const isAdminAtauSuper = currentUser?.role?.toUpperCase().includes('ADMIN') || currentUser?.role?.toUpperCase().includes('SUPER');
@@ -76,11 +117,32 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
       
       // Objek Map untuk menampung data dari Google Sheets
       const gsheetMapping: Record<string, string> = {};
+      let currentSource: 'system' | 'gsheet' | 'csv' = 'system';
+      let sourceLabel = 'Menggunakan Nilai Default Aplikasi';
+      let sourceDetails = 'Data rill disamakan dengan stok sistem default.';
       
       try {
-        const gsheetUrl = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vSbvA_5FOxi2-nkfz8iJbptOhDfBCLM5LnTwrVLeJ4pf1hlGjSBywsTXQYYtEjuo0DY2M63wcJmc0tP/pub?gid=1541449669&single=true&output=csv';
-        const response = await fetch(gsheetUrl);
-        const csvText = await response.text();
+        let csvText = '';
+        try {
+          const response = await fetch(`/api/gsheet-proxy?url=${encodeURIComponent(gsheetUrl)}`);
+          if (!response.ok) {
+            throw new Error(`Proxy status: ${response.status}`);
+          }
+          csvText = await response.text();
+          currentSource = 'gsheet';
+          sourceLabel = 'Google Sheet Terkoneksi (Live)';
+          sourceDetails = 'Sinkronisasi live via Google Sheet berhasil.';
+        } catch (proxyError: any) {
+          console.info('Custom proxy failed/unreachable. Trying direct fetch...', proxyError.message || proxyError);
+          const directResponse = await fetch(gsheetUrl);
+          if (!directResponse.ok) {
+            throw new Error(`Direct fetch status: ${directResponse.status}`);
+          }
+          csvText = await directResponse.text();
+          currentSource = 'gsheet';
+          sourceLabel = 'Google Sheet Terkoneksi (Direct)';
+          sourceDetails = 'Sinkronisasi langsung via link web berhasil (tanpa proxy).';
+        }
         
         const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
         if (lines.length > 0) {
@@ -89,7 +151,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
           // Cari indeks kolom berdasarkan nama header di GSheet
           const skuIdx = headers.findIndex(h => h.toLowerCase().includes('sku'));
           const nameIdx = headers.findIndex(h => h.toLowerCase().includes('nama'));
-          const stockIdx = headers.findIndex(h => h.toLowerCase().includes('stock sistem') || h.toLowerCase().includes('stok sistem'));
+          const stockIdx = headers.findIndex(h => h.toLowerCase().includes('stock sistem') || h.toLowerCase().includes('stok sistem') || h.toLowerCase().includes('stock rill') || h.toLowerCase().includes('stok rill') || h.toLowerCase().includes('qty'));
           
           if (skuIdx !== -1 && stockIdx !== -1) {
             for (let i = 1; i < lines.length; i++) {
@@ -111,9 +173,35 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
             }
           }
         }
-      } catch (csvError) {
-        console.error('Gagal memuat data dari GSheet, menggunakan fallback internal:', csvError);
+        setSavedMapping(gsheetMapping);
+        localStorage.setItem('cached_stock_mapping', JSON.stringify(gsheetMapping));
+      } catch (csvError: any) {
+        // Fallback to loaded CSV if present
+        if (Object.keys(savedMapping).length > 0) {
+          Object.assign(gsheetMapping, savedMapping);
+          currentSource = syncStatus.source;
+          sourceLabel = syncStatus.label;
+          sourceDetails = syncStatus.details || '';
+        } else {
+          console.info('Using local client status fallback. GSheet not reachable:', csvError.message || csvError);
+          currentSource = 'system';
+          sourceLabel = 'GSheet Belum Sinkron (Offline)';
+          sourceDetails = 'Spreadsheet privat / belum dipublikasikan ke web. Silakan hubungkan link baru atau gunakan tombol "Upload CSV"';
+          
+          setMessage({
+            type: 'warning',
+            text: 'Google Sheet tidak dapat diakses (Privat/Belum Dipublish). Menggunakan nilai bawaan, atau silakan gunakan tombol "Upload CSV".'
+          });
+        }
       }
+
+      const statusObj = {
+        source: currentSource,
+        label: sourceLabel,
+        details: sourceDetails
+      };
+      setSyncStatus(statusObj);
+      localStorage.setItem('cached_sync_status', JSON.stringify(statusObj));
 
       const flattenedItems: StockBalanceItem[] = [];
       const initialInputs: Record<string, string> = {};
@@ -122,7 +210,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
         const invData = invDetails[p.sku] || { totalPhysicalQty: 0, locators: {} };
         const locatorsEntries = Object.entries(invData.locators);
 
-        // Ambil nilai dari hasil mapping GSheet
+        // Ambil nilai dari hasil mapping
         const pSkuLower = p.sku.trim().toLowerCase();
         const pNameLower = p.name.trim().toLowerCase();
         const matchedGsheetValue = gsheetMapping[`${pSkuLower}_${pNameLower}`] || gsheetMapping[pSkuLower];
@@ -141,7 +229,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                 uom: p.uom || 'PCS',
               });
               
-              // Set Stock Rill mengambil dari kolom 'Stock Sistem' GSheet jika berhasil dicocokkan
+              // Set Stock Rill mengambil dari kolom 'Stock Sistem' jika berhasil dicocokkan
               initialInputs[uniqueId] = matchedGsheetValue !== undefined ? matchedGsheetValue : data.physicalQty.toString();
             }
           });
@@ -163,7 +251,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
       setStockItems(flattenedItems);
       setRealStockInputs(initialInputs);
     } catch (error) {
-      console.error(error);
+      console.info('Error loading stock balance items:', error);
       setMessage({ type: 'error', text: 'Gagal memuat data stok dari sistem.' });
     } finally {
       setLoading(false);
@@ -205,6 +293,115 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
     } catch (e) {
       setMessage({ type: 'error', text: 'Gagal memperbarui keseimbangan stok.' });
     }
+  };
+
+  // CSV File Uploader / Parser
+  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const csvText = event.target?.result as string;
+        if (!csvText) {
+          throw new Error('File CSV kosong.');
+        }
+
+        const lines = csvText.split(/\r?\n/).filter(line => line.trim() !== '');
+        if (lines.length === 0) {
+          throw new Error('Format CSV tidak valid.');
+        }
+
+        const headers = parseCSVLine(lines[0]);
+        const skuIdx = headers.findIndex(h => h.toLowerCase().includes('sku'));
+        const nameIdx = headers.findIndex(h => h.toLowerCase().includes('nama'));
+        const stockIdx = headers.findIndex(h => 
+          h.toLowerCase().includes('stock rill') || 
+          h.toLowerCase().includes('stok rill') || 
+          h.toLowerCase().includes('stock sistem') || 
+          h.toLowerCase().includes('stok sistem') || 
+          h.toLowerCase().includes('qty') || 
+          h.toLowerCase().includes('jumlah')
+        );
+
+        if (skuIdx === -1 || stockIdx === -1) {
+          throw new Error('Kolom "SKU" dan pencocok jumlah stok tidak ditemukan di file CSV. Pastikan ada nama kolom "Kode SKU" dan juga kolom penentu jumlah fisik.');
+        }
+
+        const newMapping: Record<string, string> = {};
+        for (let i = 1; i < lines.length; i++) {
+          const cols = parseCSVLine(lines[i]);
+          if (cols.length > Math.max(skuIdx, stockIdx)) {
+            const skuKey = cols[skuIdx].trim().toLowerCase();
+            const nameKey = nameIdx !== -1 ? cols[nameIdx].trim().toLowerCase() : '';
+            const stockValue = cols[stockIdx].trim();
+            
+            const compositeKey = `${skuKey}_${nameKey}`;
+            newMapping[compositeKey] = stockValue;
+            
+            if (!newMapping[skuKey]) {
+              newMapping[skuKey] = stockValue;
+            }
+          }
+        }
+
+        setSavedMapping(newMapping);
+        localStorage.setItem('cached_stock_mapping', JSON.stringify(newMapping));
+        const statusObj = {
+          source: 'csv' as const,
+          label: 'File CSV Terunggah (Lokal)',
+          details: `Sinkronisasi lokal berhasil dari file: ${file.name}`
+        };
+        setSyncStatus(statusObj);
+        localStorage.setItem('cached_sync_status', JSON.stringify(statusObj));
+
+        // Update inputs
+        setRealStockInputs((prevInputs) => {
+          const updated = { ...prevInputs };
+          stockItems.forEach(item => {
+            const pSkuLower = item.sku.trim().toLowerCase();
+            const pNameLower = item.name.trim().toLowerCase();
+            const matchedValue = newMapping[`${pSkuLower}_${pNameLower}`] || newMapping[pSkuLower];
+            if (matchedValue !== undefined) {
+              updated[item.id] = matchedValue;
+            }
+          });
+          return updated;
+        });
+
+        setMessage({
+          type: 'success',
+          text: `Berhasil sinkronisasi fisik dari file "${file.name}" (${Object.keys(newMapping).length} baris data ditemukan).`
+        });
+
+      } catch (err: any) {
+        setMessage({
+          type: 'error',
+          text: `Gagal memproses file CSV: ${err.message}`
+        });
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleSaveGsheetUrl = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tempUrl.startsWith('https://docs.google.com/spreadsheets/')) {
+      setMessage({ type: 'error', text: 'URL spreadsheet tidak valid. Harus diawali dengan https://docs.google.com/spreadsheets/' });
+      return;
+    }
+    
+    localStorage.setItem('gsheet_url', tempUrl);
+    setGsheetUrl(tempUrl);
+    setIsSettingsOpen(false);
+    
+    setMessage({ type: 'success', text: 'Link Google Sheet berhasil diperpanjang. Memulai sinkronisasi...' });
+    
+    setTimeout(() => {
+      fetchStockData();
+    }, 100);
   };
 
   const handleExportExcel = () => {
@@ -324,14 +521,81 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
         </div>
       </div>
 
+      {/* SYNC STATUS SUB-BAR */}
+      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className={`p-2.5 rounded-lg border ${
+            syncStatus.source === 'gsheet' 
+              ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+              : syncStatus.source === 'csv'
+                ? 'bg-blue-50 text-blue-700 border-blue-200'
+                : 'bg-slate-100 text-slate-500 border-slate-300'
+          }`}>
+            {syncStatus.source === 'gsheet' ? (
+              <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+            ) : syncStatus.source === 'csv' ? (
+              <Upload className="w-5 h-5 text-blue-600" />
+            ) : (
+              <AlertCircle className="w-5 h-5 text-slate-500" />
+            )}
+          </div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className={`text-[11px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                syncStatus.source === 'gsheet' 
+                  ? 'bg-emerald-100 text-emerald-800 border border-emerald-200' 
+                  : syncStatus.source === 'csv'
+                    ? 'bg-blue-100 text-blue-800 border border-blue-200'
+                    : 'bg-slate-100 text-slate-700 border border-slate-200'
+              }`}>
+                {syncStatus.label}
+              </span>
+            </div>
+            <p className="text-slate-500 text-xs mt-1 leading-normal">
+              {syncStatus.details}
+            </p>
+          </div>
+        </div>
+
+        {/* ACTIONS */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <button 
+            onClick={() => {
+              setTempUrl(gsheetUrl);
+              setIsSettingsOpen(true);
+            }}
+            className="px-3 py-2 hover:bg-slate-100 rounded-lg border border-slate-200 bg-white transition-colors flex items-center gap-1.5 text-xs font-bold text-slate-700 shadow-xs"
+            title="Ubah URL Google Sheet"
+          >
+            <Settings className="w-3.5 h-3.5 text-slate-500" />
+            Atur Link GSheet
+          </button>
+
+          <label className="px-3 py-2 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 rounded-lg border border-slate-200 bg-white transition-colors flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer shadow-xs">
+            <Upload className="w-3.5 h-3.5 text-slate-500" />
+            <span>Upload CSV</span>
+            <input 
+              type="file" 
+              accept=".csv" 
+              onChange={handleCSVUpload} 
+              className="hidden" 
+            />
+          </label>
+        </div>
+      </div>
+
       {/* NOTIFIKASI MESSAGE */}
       {message && (
         <div className={`p-4 rounded-lg flex items-center gap-2 text-sm font-bold border ${
-          message.type === 'success' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-red-50 text-red-700 border-red-200'
+          message.type === 'success' 
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+            : message.type === 'warning'
+              ? 'bg-amber-50 text-amber-700 border-amber-200'
+              : 'bg-red-50 text-red-700 border-red-200'
         }`}>
-          <AlertCircle className="w-5 h-5" />
-          {message.text}
-          <button className="ml-auto text-slate-400 hover:text-slate-600" onClick={() => setMessage(null)}>×</button>
+          <AlertCircle className="w-5 h-5 shrink-0" />
+          <span className="flex-1">{message.text}</span>
+          <button className="ml-auto text-slate-400 hover:text-slate-600 font-bold" onClick={() => setMessage(null)}>×</button>
         </div>
       )}
 
@@ -345,7 +609,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">DESKRIPSI NAMA</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KATEGORI</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">STOCK SISTEM</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-40 text-center">STOCK RILL (GSHEET)</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-40 text-center">STOCK RILL (GSHEET/CSV)</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">SELISIH</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">STATUS / AKSI</th>
               </tr>
@@ -513,6 +777,60 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
           </div>
         )}
       </div>
+
+      {/* SETTINGS DIALOG */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center z-[200] p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden border border-slate-200">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2 uppercase tracking-wide">
+                <Settings className="w-4 h-4 text-blue-600" />
+                Pengaturan Link Google Sheet
+              </h3>
+              <button 
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            <form onSubmit={handleSaveGsheetUrl} className="p-6 space-y-4 text-left">
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Pastikan Google Sheet Anda telah dipublikasikan ke web sebagai file **CSV**. Anda dapat melakukannya via menu <span className="font-semibold">File &gt; Share &gt; Publish to web</span>, pilih link berformat <span className="font-semibold">Comma-separated values (.csv)</span>.
+              </p>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-600">URL Spreadsheet CSV:</label>
+                <input 
+                  type="text"
+                  required
+                  value={tempUrl}
+                  onChange={(e) => setTempUrl(e.target.value)}
+                  placeholder="https://docs.google.com/spreadsheets/d/e/..."
+                  className="w-full p-2.5 text-xs border border-slate-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 font-mono"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button 
+                  type="button"
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="px-4 py-2 border border-slate-200 rounded text-xs font-semibold hover:bg-slate-50 text-slate-600"
+                >
+                  Batal
+                </button>
+                <button 
+                  type="submit"
+                  className="px-4 py-2 bg-blue-600 text-white rounded text-xs font-semibold hover:bg-blue-700 hover:shadow-sm transition-all"
+                >
+                  Simpan & Hubungkan
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
