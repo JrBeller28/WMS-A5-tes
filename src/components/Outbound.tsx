@@ -30,6 +30,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
   // Form State
   const [selectedSku, setSelectedSku] = useState('');
   const [targetQty, setTargetQty] = useState('');
+  const [inputUnit, setInputUnit] = useState<'PCS' | 'PACK'>('PCS');
   const [memo, setMemo] = useState('');
   const [editingManifestId, setEditingManifestId] = useState<string | null>(null);
   
@@ -128,9 +129,18 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
     });
   }, [selectedSku, locators, isVolumeInvalid]);
 
+  const actualTargetQty = useMemo(() => {
+    if (!targetQty || isNaN(Number(targetQty))) return 0;
+    const baseQty = Number(targetQty);
+    if (inputUnit === 'PACK' && productDetails?.packingSize && productDetails?.packUom) {
+      return baseQty * productDetails.packingSize;
+    }
+    return baseQty;
+  }, [targetQty, inputUnit, productDetails]);
+
   // Kalkulasi Intuitif Murni untuk Rekomendasi AI
   const aiRecommendedAllocations = useMemo(() => {
-    const qty = parseInt(targetQty);
+    const qty = actualTargetQty;
     if (!qty || qty <= 0 || !availableStock || availableStock.length === 0 || isVolumeInvalid) return {};
 
     let remaining = qty;
@@ -143,7 +153,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
       remaining -= take;
     }
     return recommended;
-  }, [targetQty, availableStock, isVolumeInvalid]);
+  }, [actualTargetQty, availableStock, isVolumeInvalid]);
 
   // Set alokasi otomatis saat target qty berubah pertama kali sebagai baseline rekomendasi awal
   useEffect(() => {
@@ -153,15 +163,15 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
 
   const totalAvailable = useMemo(() => (availableStock || []).reduce((sum, item) => sum + (item?.available || 0), 0), [availableStock]);
   const totalAllocated = useMemo(() => Object.values(allocations || {}).reduce((sum: number, qty: any) => sum + (Number(qty) || 0), 0), [allocations]);
-  const unallocatedQty = Math.max(0, Number(targetQty || 0) - totalAllocated);
-  const isTargetMet = parseInt(targetQty) > 0 && totalAllocated === parseInt(targetQty);
-  const isExceedingStock = parseInt(targetQty) > totalAvailable && !editingManifestId;
+  const unallocatedQty = Math.max(0, actualTargetQty - totalAllocated);
+  const isTargetMet = actualTargetQty > 0 && totalAllocated === actualTargetQty;
+  const isExceedingStock = actualTargetQty > totalAvailable && !editingManifestId;
 
   // Menghasilkan string rekomendasi alokasi slot dinamis untuk banner AI tetap bersih
   const aiRecommendationSlots = useMemo(() => {
     if (!selectedSku) return 'Silakan tentukan SKU material terlebih dahulu';
     if (isVolumeInvalid) return 'Barang tidak valid (volume kosong). Hubungi Super Admin.';
-    if (!targetQty || Number(targetQty) <= 0) return 'Masukkan kuantitas target pick untuk memetakan lokasi';
+    if (!actualTargetQty || actualTargetQty <= 0) return 'Masukkan kuantitas target pick untuk memetakan lokasi';
     
     const activeSlots = Object.entries(aiRecommendedAllocations || {})
       .filter(([_, qty]) => (qty as number) > 0)
@@ -177,6 +187,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
     setEditingManifestId(group.manifestId);
     setSelectedSku(group.sku);
     setTargetQty(group.totalQty ? group.totalQty.toString() : '0');
+    setInputUnit('PCS');
     setMemo(group.memo || '');
     
     const newAllocations: Record<string, number> = {};
@@ -195,6 +206,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
     setEditingManifestId(null);
     setSelectedSku('');
     setTargetQty('');
+    setInputUnit('PCS');
     setAllocations({});
     setMemo('');
     setMessage(null);
@@ -486,7 +498,19 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
                 {selectedSku && !isVolumeInvalid && (
                   <div className="grid grid-cols-2 gap-3 animate-fadeIn">
                     <div>
-                      <label className="block text-xs text-slate-600 mb-1 font-semibold">Total Qty Pick</label>
+                      <label className="block text-xs text-slate-600 mb-1 font-semibold flex justify-between">
+                        <span>Total Qty Pick</span>
+                        {productDetails?.packUom && productDetails?.packingSize && (
+                          <select 
+                            value={inputUnit} 
+                            onChange={(e: any) => setInputUnit(e.target.value)}
+                            className="bg-transparent text-blue-600 font-bold outline-none cursor-pointer"
+                          >
+                            <option value="PCS">{productDetails.uom}</option>
+                            <option value="PACK">{productDetails.packUom}</option>
+                          </select>
+                        )}
+                      </label>
                       <input 
                         type="number" 
                         value={targetQty}
@@ -495,6 +519,9 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
                         min="1"
                         className="w-full p-2 border border-slate-300 rounded text-xs outline-none focus:border-[#0055C4] font-bold"
                       />
+                      {inputUnit === 'PACK' && productDetails?.packingSize && (
+                        <p className="text-[10px] text-blue-600 mt-1 font-medium">Berdampak pada: {actualTargetQty} {productDetails.uom}</p>
+                      )}
                     </div>
                     <div>
                       <label className="block text-xs text-slate-600 mb-1 font-semibold">Stok Tersedia</label>
@@ -508,15 +535,15 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
                   </div>
                 )}
 
-                {Number(targetQty) > 0 && !isExceedingStock && !isVolumeInvalid && (
+                {actualTargetQty > 0 && !isExceedingStock && !isVolumeInvalid && (
                   <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-[11px] space-y-1 font-medium animate-fadeIn">
                     <div className="flex justify-between">
                       <span className="text-slate-500">Sisa Belum Teralokasi:</span>
-                      <span className={`font-bold ${unallocatedQty > 0 ? 'text-blue-600' : 'text-emerald-600'}`}>{unallocatedQty} PCS</span>
+                      <span className={`font-bold ${unallocatedQty > 0 ? 'text-blue-600' : 'text-emerald-600'}`}>{unallocatedQty} {productDetails?.uom || 'PCS'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Total Siap Diambil:</span>
-                      <span className="font-bold text-[#0055C4]">{totalAllocated} / {targetQty} PCS</span>
+                      <span className="font-bold text-[#0055C4]">{totalAllocated} / {actualTargetQty} {productDetails?.uom || 'PCS'}</span>
                     </div>
                   </div>
                 )}

@@ -46,6 +46,30 @@ async function startServer() {
     res.json({ status: "ok" });
   });
 
+  // API Rack Scanner (Mock for Backend Requirement)
+  app.get("/api/racks/:barcode", async (req, res) => {
+    try {
+      const { barcode } = req.params;
+      
+      // In a real backend, we'd query Firebase using firebase-admin.
+      // Here we simulate the response structure as requested.
+      res.json({
+         success: true,
+         rack: {
+           code: barcode,
+           zone: "A",
+           capacity: 1000,
+           used: 650
+         },
+         items: [
+           { sku: "SKU001", name: "Produk A", qty: 100, batch: "B001", expired: "2027-01-01" }
+         ]
+      });
+    } catch (error) {
+      res.status(500).json({ success: false, message: "Server error" });
+    }
+  });
+
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

@@ -237,6 +237,78 @@ export const getInventoryDetails = async () => {
     return inventory;
 };
 
+export const getRackDetailsByBarcode = async (barcode: string) => {
+  // We use `id` or `barcode` as barcode lookup
+  const locRef = doc(db, 'locators', barcode);
+  const locSnap = await getDoc(locRef);
+  
+  let rackData = locSnap.exists() ? locSnap.data() as Locator : null;
+
+  if (!rackData) {
+    // Try to find by id or barcode field
+    const locatorsRef = collection(db, 'locators');
+    // For id:
+    let q = query(locatorsRef, where('id', '==', barcode));
+    let querySnapshot = await getDocs(q);
+    
+    if (querySnapshot.empty) {
+       // Search by barcode field
+       q = query(locatorsRef, where('barcode', '==', barcode));
+       querySnapshot = await getDocs(q);
+    }
+    
+    if (querySnapshot.empty) {
+      return { success: false, message: "Rack tidak ditemukan" };
+    }
+    rackData = querySnapshot.docs[0].data() as Locator;
+  }
+
+  const theRack = rackData;
+
+  const products = await getProducts();
+  const transactions = await getTransactions();
+
+  let usedVolume = 0;
+  const itemsMap: Record<string, { sku: string, name: string, qty: number, batch: string, expired: string }> = {};
+
+  for (const tx of transactions) {
+    if (tx.locatorId !== theRack.id || tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
+    
+    if (!itemsMap[tx.sku]) {
+      const p = products.find(x => x.sku === tx.sku);
+      if (!p) continue;
+      itemsMap[tx.sku] = { sku: tx.sku, name: p.name, qty: 0, batch: 'N/A', expired: 'N/A' };
+    }
+
+    if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {
+      itemsMap[tx.sku].qty += tx.qty;
+    } else if (tx.type === 'OUTBOUND' && (tx.status === 'CONFIRMED' || tx.status === 'BOOKED')) {
+      itemsMap[tx.sku].qty += tx.qty; // Note: OUTBOUND qty is negative
+    }
+  }
+
+  const items = [];
+  for (const sku in itemsMap) {
+    const item = itemsMap[sku];
+    if (item.qty > 0) {
+      const p = products.find(x => x.sku === sku);
+      usedVolume += (item.qty * (p?.volumeM3 || 0));
+      items.push(item);
+    }
+  }
+
+  return {
+    success: true,
+    rack: {
+      code: theRack.id,
+      zone: theRack.zone,
+      capacity: theRack.maxVolumeM3,
+      usedCapacity: usedVolume
+    },
+    items
+  };
+};
+
 export const transferInventory = async (sku: string, fromLocatorId: string, toLocatorId: string, qty: number, operator: string) => {
   const batch = writeBatch(db);
   const outTxId = uuidv4();

@@ -511,7 +511,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
             <button onClick={() => { setShowForm(false); setEditingProduct(null); }} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
           </div>
           
-          <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 ${!editingProduct ? 'xl:grid-cols-7' : ''} gap-4`}>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">SKU</label>
               <input 
@@ -563,13 +563,34 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
               />
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">UOM</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Satuan Terkecil (UOM)</label>
               <input 
                 type="text" 
                 value={formData.uom || ''} 
                 onChange={e => setFormData({...formData, uom: e.target.value.toUpperCase()})}
                 className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 font-mono"
                 placeholder="PCS"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Pack UOM (Opsional)</label>
+              <input 
+                type="text" 
+                value={formData.packUom || ''} 
+                onChange={e => setFormData({...formData, packUom: e.target.value.toUpperCase()})}
+                className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 font-mono"
+                placeholder="DUS / CARTON"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Isi per Pack</label>
+              <input 
+                type="number"
+                min="1" 
+                value={formData.packingSize || ''} 
+                onChange={e => setFormData({...formData, packingSize: e.target.value === '' ? undefined : parseInt(e.target.value, 10)})}
+                className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 font-mono"
+                placeholder="10"
               />
             </div>
 
@@ -793,6 +814,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KODE SKU</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">DESKRIPSI NAMA</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KATEGORI LAYOUT SLOT</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">PACKAGING / UOM</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">POSISI RAK (SLOT)</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">DIMENSI (VOL/BERAT)</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">JUMLAH ON HAND</th>
@@ -821,6 +843,14 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
                   </td>
                   <td className="px-6 py-4 text-sm font-bold text-slate-800">{p.name}</td>
                   <td className="px-6 py-4 text-sm font-medium text-slate-500">{p.category.replace('_', ' ')}</td>
+                  <td className="px-6 py-4">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-sm font-bold text-slate-700">{p.uom}</span>
+                      {p.packUom && p.packingSize && (
+                        <span className="text-[10px] text-slate-500 font-medium">1 {p.packUom} = {p.packingSize} {p.uom}</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-6 py-4">
                      {activeLocators.length > 0 ? (
                        <div className="flex flex-wrap gap-1">

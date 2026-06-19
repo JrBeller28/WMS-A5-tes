@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Layers, Plus, Pencil, Trash2, X, Save, Search, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Layers, Plus, Pencil, Trash2, X, Save, Search, RefreshCw, AlertTriangle, Printer, QrCode } from 'lucide-react';
+import QRCode from 'react-qr-code';
 import { getLocators, addLocator, updateLocator, deleteLocator } from '../lib/db';
 import { Locator, ZoneCategory } from '../types';
 
@@ -9,6 +10,8 @@ export const RackManagement = () => {
   const [search, setSearch] = useState('');
 
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [printLocator, setPrintLocator] = useState<Locator | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // Form State
@@ -18,6 +21,7 @@ export const RackManagement = () => {
   const [level, setLevel] = useState<number>(1);
   const [zone, setZone] = useState<ZoneCategory>('DEFAULT');
   const [maxVolume, setMaxVolume] = useState<number>(5.4);
+  const [barcode, setBarcode] = useState('');
 
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -47,6 +51,7 @@ export const RackManagement = () => {
     setLevel(1);
     setZone('DEFAULT');
     setMaxVolume(5.4);
+    setBarcode('');
     setError('');
     setSuccess('');
     setIsModalOpen(true);
@@ -60,6 +65,7 @@ export const RackManagement = () => {
     setLevel(locator.level);
     setZone(locator.zone);
     setMaxVolume(locator.maxVolumeM3);
+    setBarcode(locator.barcode || '');
     setError('');
     setSuccess('');
     setIsModalOpen(true);
@@ -96,6 +102,7 @@ export const RackManagement = () => {
         level: level,
         zone: zone,
         maxVolumeM3: maxVolume,
+        barcode: barcode.trim() || id.trim(),
       };
 
       if (editingId) {
@@ -217,6 +224,7 @@ export const RackManagement = () => {
             <thead className="bg-slate-50">
               <tr>
                 <th scope="col" className="px-6 py-4 text-left text-xs font-bold text-slate-500 tracking-wider">ID LOCATOR</th>
+                <th scope="col" className="px-6 py-4 text-left text-xs font-bold text-slate-500 tracking-wider">BARCODE</th>
                 <th scope="col" className="px-6 py-4 text-left text-xs font-bold text-slate-500 tracking-wider">RAK</th>
                 <th scope="col" className="px-6 py-4 text-left text-xs font-bold text-slate-500 tracking-wider">KOLOM / TINGKAT</th>
                 <th scope="col" className="px-6 py-4 text-left text-xs font-bold text-slate-500 tracking-wider">KATEGORI ZONA</th>
@@ -242,6 +250,9 @@ export const RackManagement = () => {
                         {loc.id}
                       </span>
                     </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500 font-mono">
+                      {loc.barcode || "-"}
+                    </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-slate-800">
                       {loc.rack}
                     </td>
@@ -258,6 +269,16 @@ export const RackManagement = () => {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-center">
                       <div className="flex items-center justify-center gap-2">
+                        <button 
+                          onClick={() => {
+                            setPrintLocator(loc);
+                            setIsPrintModalOpen(true);
+                          }}
+                          className="p-1.5 text-slate-600 hover:bg-slate-100 rounded"
+                          title="Print Barcode"
+                        >
+                          <QrCode className="w-4 h-4" />
+                        </button>
                         <button 
                           onClick={() => openEditModal(loc)}
                           className="p-1.5 text-blue-600 hover:bg-blue-50 rounded"
@@ -325,6 +346,17 @@ export const RackManagement = () => {
                     placeholder="Contoh: FL-A1.1"
                   />
                   <p className="text-[10px] text-slate-500 mt-1">Harus unik. Gunakan format konsisten (Misal Rak-Kolom.Tingkat)</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Barcode (Opsional)</label>
+                  <input
+                    type="text"
+                    value={barcode}
+                    onChange={e => setBarcode(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
+                    placeholder="Otomatis sama dengan ID Locator jika kosong"
+                  />
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -411,6 +443,67 @@ export const RackManagement = () => {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {isPrintModalOpen && printLocator && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[60] p-4 print:bg-white print:p-0">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden border border-slate-200 print:shadow-none print:border-none print:w-[300px]">
+            <div className="bg-slate-50 px-6 py-4 border-b border-slate-200 flex items-center justify-between print:hidden">
+              <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                <Printer className="w-5 h-5 text-blue-600" />
+                Print Barcode Rack
+              </h3>
+              <button 
+                onClick={() => {
+                  setIsPrintModalOpen(false);
+                  setPrintLocator(null);
+                }}
+                className="text-slate-400 hover:text-slate-600 transition-colors p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            {/* Area Print Aktual */}
+            <div className="p-8 pb-4 text-center bg-white print:p-4">
+              <div className="border-4 border-slate-900 inline-block p-4 rounded-xl bg-white">
+                <QRCode 
+                  value={printLocator.barcode || printLocator.id} 
+                  size={200}
+                  level="H"
+                />
+              </div>
+              <h4 className="mt-6 text-3xl font-black text-slate-900 tracking-wider font-mono uppercase">
+                {printLocator.barcode || printLocator.id}
+              </h4>
+              <p className="text-sm font-bold text-slate-500 mt-2">
+                ZONE: {printLocator.zone.replace('_', ' ')}
+              </p>
+            </div>
+            
+            <div className="p-6 pt-2 pb-6 print:hidden flex flex-col gap-3">
+              <p className="text-xs text-center text-slate-500 mb-2">Tempelkan barcode ini pada rak fisik agar operator dapat memindainya melalui Rack Scanner.</p>
+              <button
+                onClick={() => window.print()}
+                className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-bold text-white transition-colors shadow flex items-center justify-center gap-2"
+              >
+                <Printer className="w-4 h-4" />
+                Print Sekarang
+              </button>
+            </div>
+          </div>
+          
+          <style dangerouslySetInnerHTML={{__html: `
+            @media print {
+              body * { visibility: hidden; }
+              .print\\:block, .print\\:block * { visibility: visible !important; }
+              .fixed.inset-0.z-\\[60\\] { position: absolute; left: 0; top: 0; width: 100%; height: auto; background: white; }
+              .fixed.inset-0.z-\\[60\\] > div { box-shadow: none; border: none; align-items: flex-start; justify-content: flex-start; }
+              .fixed.inset-0.z-\\[60\\] * { visibility: visible; }
+              .print\\:hidden { display: none !important; }
+            }
+          `}} />
         </div>
       )}
     </div>

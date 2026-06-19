@@ -27,6 +27,8 @@ interface StockBalanceItem {
   category: string;
   systemStock: number;
   uom: string;
+  packUom?: string;
+  packingSize?: number;
 }
 
 interface GroupedStock {
@@ -34,6 +36,8 @@ interface GroupedStock {
   name: string;
   category: string;
   uom: string;
+  packUom?: string;
+  packingSize?: number;
   totalSystemStock: number;
   items: StockBalanceItem[];
 }
@@ -229,6 +233,8 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                 category: p.category,
                 systemStock: data.physicalQty,
                 uom: p.uom || 'PCS',
+                packUom: p.packUom,
+                packingSize: p.packingSize,
               });
               
               // Set Stock Rill mengambil dari kolom 'Stock Sistem' jika berhasil dicocokkan
@@ -245,6 +251,8 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
             category: p.category,
             systemStock: 0,
             uom: p.uom || 'PCS',
+            packUom: p.packUom,
+            packingSize: p.packingSize,
           });
           initialInputs[uniqueId] = matchedGsheetValue !== undefined ? matchedGsheetValue : '0';
         }
@@ -446,6 +454,8 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
         name: item.name,
         category: item.category,
         uom: item.uom,
+        packUom: item.packUom,
+        packingSize: item.packingSize,
         totalSystemStock: 0,
         items: []
       };
@@ -641,8 +651,22 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                       </td>
                       <td className="px-6 py-4 text-sm font-bold text-slate-800">{group.name}</td>
                       <td className="px-6 py-4 text-sm font-medium text-slate-500">{group.category.replace('_', ' ')}</td>
-                      <td className="px-6 py-4 text-sm font-bold font-mono text-slate-600 text-right">{group.totalSystemStock} {group.uom}</td>
-                      <td className="px-6 py-4 text-sm font-bold font-mono text-slate-800 text-center">{groupRealStock} {group.uom}</td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col items-end gap-0.5">
+                          <span className="text-sm font-bold font-mono text-slate-600">{group.totalSystemStock} {group.uom}</span>
+                          {group.packUom && group.packingSize && (
+                            <span className="text-[10px] text-slate-500 font-medium">({Math.floor(group.totalSystemStock / group.packingSize)} {group.packUom} + {group.totalSystemStock % group.packingSize} {group.uom})</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="text-sm font-bold font-mono text-slate-800">{groupRealStock} {group.uom}</span>
+                          {group.packUom && group.packingSize && (
+                            <span className="text-[10px] text-slate-500 font-medium">({Math.floor(groupRealStock / group.packingSize)} {group.packUom} + {groupRealStock % group.packingSize} {group.uom})</span>
+                          )}
+                        </div>
+                      </td>
                       <td className={`px-6 py-4 text-sm font-bold font-mono text-right ${
                         groupDifference === 0 ? 'text-slate-500' : groupDifference > 0 ? 'text-red-600' : 'text-blue-600'
                       }`}>
@@ -675,7 +699,14 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                             Rak: <span className="px-2 py-0.5 bg-white border border-slate-200 rounded text-xs text-slate-700">{item.locatorId}</span>
                           </td>
                           <td className="px-6 py-3 text-xs text-slate-400 italic" colSpan={2}>Alokasi Stok Fisik Rak</td>
-                          <td className="px-6 py-3 text-sm font-semibold font-mono text-slate-500 text-right">{item.systemStock} {item.uom}</td>
+                          <td className="px-6 py-3">
+                            <div className="flex flex-col items-end gap-0.5">
+                              <span className="text-sm font-semibold font-mono text-slate-500">{item.systemStock} {item.uom}</span>
+                              {item.packUom && item.packingSize && (
+                                <span className="text-[9px] text-slate-400 font-medium">({Math.floor(item.systemStock / item.packingSize)} {item.packUom} + {item.systemStock % item.packingSize} {item.uom})</span>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-4 py-3 text-center">
                             <div className="flex items-center justify-center gap-1.5">
                               <input

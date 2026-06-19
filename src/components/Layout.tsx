@@ -14,7 +14,8 @@ import {
   ShieldAlert,
   UserPlus,
   Layers,
-  ArrowRightLeft
+  ArrowRightLeft,
+  ScanBarcode
 } from 'lucide-react';
 import { getCurrentUser, logoutUser } from '../lib/auth';
 import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
@@ -121,6 +122,7 @@ export function Layout({
     { id: 'outbound', label: 'Outbound', icon: LogOut },
     { id: 'ledger', label: 'Stock Ledger', icon: History },
     { id: 'balance', label: 'Stock Balance', icon: Scale },
+    { id: 'scanner', label: 'Rack Scanner', icon: ScanBarcode },
   ];
 
   if (user && ['Developer', 'Super Admin', 'Admin A5', 'Kepala Gudang JKT'].includes(user.role)) {

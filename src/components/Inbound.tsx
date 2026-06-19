@@ -22,6 +22,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedSku, setSelectedSku] = useState('');
   const [totalQty, setTotalQty] = useState('');
+  const [inputUnit, setInputUnit] = useState<'PCS' | 'PACK'>('PCS');
   const [recommendations, setRecommendations] = useState<Locator[]>([]);
   const [message, setMessage] = useState<{type: 'success'|'error', text: string} | null>(null);
   const [loading, setLoading] = useState(false);
@@ -108,7 +109,16 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
     }
   }, [selectedSku, products]);
 
-  const unallocatedQty = Math.max(0, Number(totalQty || 0) - tempAllocations.reduce((sum, item) => sum + item.qty, 0));
+  const actualTotalQty = React.useMemo(() => {
+    if (!totalQty || isNaN(Number(totalQty))) return 0;
+    const baseQty = Number(totalQty);
+    if (inputUnit === 'PACK' && productDetails?.packingSize && productDetails?.packUom) {
+      return baseQty * productDetails.packingSize;
+    }
+    return baseQty;
+  }, [totalQty, inputUnit, productDetails]);
+
+  const unallocatedQty = Math.max(0, actualTotalQty - tempAllocations.reduce((sum, item) => sum + item.qty, 0));
 
   const handleRecommend = async () => {
     if (!selectedSku || unallocatedQty <= 0) return;
@@ -183,7 +193,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
       return;
     }
 
-    if (!totalQty || Number(totalQty) <= 0) {
+    if (!actualTotalQty || actualTotalQty <= 0) {
       setMessage({ type: 'error', text: 'Masukkan kuantitas total material masuk.' });
       return;
     }
@@ -247,6 +257,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
 
     setInboundList([...inboundList, ...newStagingItems]);
     setTotalQty('');
+    setInputUnit('PCS');
     setSelectedSku('');
     setTempAllocations([]);
     setMessage({ type: 'success', text: 'Alokasi pembagian slot masuk daftar staging.' });
@@ -468,7 +479,19 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs text-slate-600 mb-1 font-semibold">Total Qty Datang</label>
+                    <label className="block text-xs text-slate-600 mb-1 font-semibold flex justify-between">
+                      <span>Total Masuk</span>
+                      {productDetails?.packUom && productDetails?.packingSize && (
+                        <select 
+                          value={inputUnit} 
+                          onChange={(e: any) => setInputUnit(e.target.value)}
+                          className="bg-transparent text-blue-600 font-bold outline-none cursor-pointer"
+                        >
+                          <option value="PCS">{productDetails.uom}</option>
+                          <option value="PACK">{productDetails.packUom}</option>
+                        </select>
+                      )}
+                    </label>
                     <input 
                       type="number" 
                       value={totalQty}
@@ -476,27 +499,30 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
                       placeholder="Contoh: 30"
                       className="w-full p-2 border border-slate-300 rounded text-xs outline-none focus:border-blue-500"
                     />
+                    {inputUnit === 'PACK' && productDetails?.packingSize && (
+                      <p className="text-[10px] text-blue-600 mt-1 font-medium">Berdampak pada: {actualTotalQty} {productDetails.uom}</p>
+                    )}
                   </div>
                   <div>
                      <label className="block text-xs text-slate-600 mb-1 font-semibold">Total Vol (m³)</label>
                     <input 
                       type="text" 
-                      value={productDetails && totalQty ? (Number(productDetails.volumeM3 || 0) * Number(totalQty)).toFixed(3) : '0.000'}
+                      value={productDetails && actualTotalQty ? (Number(productDetails.volumeM3 || 0) * actualTotalQty).toFixed(3) : '0.000'}
                       readOnly
                       className="w-full p-2 border border-slate-300 rounded text-xs bg-slate-50 font-mono"
                     />
                   </div>
                 </div>
 
-                {Number(totalQty) > 0 && (
+                {actualTotalQty > 0 && (
                   <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-[11px] space-y-1 font-medium">
                     <div className="flex justify-between">
                       <span className="text-slate-500">Sisa Belum Terbagi:</span>
-                      <span className={`font-bold ${unallocatedQty > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{unallocatedQty} PCS</span>
+                      <span className={`font-bold ${unallocatedQty > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>{unallocatedQty} {productDetails?.uom || 'PCS'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Terbagi ke Multi-Rak:</span>
-                      <span className="font-bold text-blue-600">{tempAllocations.reduce((sum, i) => sum + i.qty, 0)} PCS</span>
+                      <span className="font-bold text-blue-600">{tempAllocations.reduce((sum, i) => sum + i.qty, 0)} {productDetails?.uom || 'PCS'}</span>
                     </div>
                   </div>
                 )}

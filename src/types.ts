@@ -15,6 +15,8 @@ export interface Product {
   category: ZoneCategory;
   volumeM3: number; // Volume per unit in M3
   uom: string;
+  packUom?: string;
+  packingSize?: number;
 }
 
 export interface Locator {
@@ -24,6 +26,7 @@ export interface Locator {
   level: number; // 1
   zone: ZoneCategory;
   maxVolumeM3: number; // usually 5.4
+  barcode?: string;
 }
 
 export type TransactionType = 'INBOUND' | 'OUTBOUND' | 'TRANSFER';
