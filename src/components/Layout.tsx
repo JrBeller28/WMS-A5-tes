@@ -143,7 +143,7 @@ export function Layout({
       )}
 
       {/* Sidebar - responsive collapse & slide-in */}
-      <aside className={`fixed inset-y-0 left-0 w-64 bg-white border-r border-slate-200 flex flex-col z-50 transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <aside className={`fixed inset-y-0 left-0 w-64 bg-white border-r border-slate-200 flex flex-col z-50 transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static print:hidden ${isMobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         <div className="px-6 py-8 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-blue-700 flex items-center gap-2">
@@ -209,7 +209,7 @@ export function Layout({
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 bg-slate-50">
         {/* Top Header */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-8 z-30 sticky top-0 gap-4">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-8 z-30 sticky top-0 gap-4 print:hidden">
           <div className="flex items-center gap-3 flex-1 max-w-xl">
             <button 
               onClick={() => setIsMobileOpen(!isMobileOpen)}
