@@ -269,7 +269,7 @@ export const getRackDetailsByBarcode = async (barcode: string) => {
   const transactions = await getTransactions();
 
   let usedVolume = 0;
-  const itemsMap: Record<string, { sku: string, name: string, qty: number, batch: string, expired: string }> = {};
+  const itemsMap: Record<string, { sku: string, name: string, qty: number, batch: string, expired: string, uom: string, packUom?: string, packingSize?: number }> = {};
 
   for (const tx of transactions) {
     if (tx.locatorId !== theRack.id || tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
@@ -277,7 +277,16 @@ export const getRackDetailsByBarcode = async (barcode: string) => {
     if (!itemsMap[tx.sku]) {
       const p = products.find(x => x.sku === tx.sku);
       if (!p) continue;
-      itemsMap[tx.sku] = { sku: tx.sku, name: p.name, qty: 0, batch: 'N/A', expired: 'N/A' };
+      itemsMap[tx.sku] = { 
+        sku: tx.sku, 
+        name: p.name, 
+        qty: 0, 
+        batch: 'N/A', 
+        expired: 'N/A',
+        uom: p.uom,
+        packUom: p.packUom,
+        packingSize: p.packingSize
+      };
     }
 
     if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {

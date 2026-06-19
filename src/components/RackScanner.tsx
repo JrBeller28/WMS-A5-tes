@@ -215,10 +215,15 @@ export function RackScanner() {
                               </span>
                             </div>
                           </div>
-                          <div className="text-right shrink-0">
-                            <span className="text-lg font-black text-slate-800 font-mono bg-slate-50 px-2 py-1 rounded border border-slate-200">
-                              {item.qty}
+                          <div className="text-right shrink-0 flex flex-col items-end">
+                            <span className="text-lg font-black text-slate-800 font-mono bg-slate-50 px-2 py-1 rounded border border-slate-200 inline-block mb-1">
+                              {item.qty} {item.uom || 'PCS'}
                             </span>
+                            {item.packUom && item.packingSize && (
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                  ({Math.floor(item.qty / item.packingSize)} {item.packUom} + {item.qty % item.packingSize} {item.uom})
+                                </span>
+                            )}
                           </div>
                         </div>
                       ))}
