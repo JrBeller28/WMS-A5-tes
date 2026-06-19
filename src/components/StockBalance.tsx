@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import * as XLSX from 'xlsx';
 import { 
   Save, 
   AlertCircle, 
@@ -109,6 +110,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
 
   const currentUser = getCurrentUser();
   const isAdminAtauSuper = currentUser?.role?.toUpperCase().includes('ADMIN') || currentUser?.role?.toUpperCase().includes('SUPER');
+  const isSuperAdmin = currentUser?.role?.toUpperCase().includes('SUPER') || currentUser?.role?.toUpperCase() === 'SUPER_ADMIN';
 
   const fetchStockData = async () => {
     setLoading(true);
@@ -405,34 +407,29 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
   };
 
   const handleExportExcel = () => {
-    const headers = ['Kode SKU', 'Nama Barang', 'Kategori', 'Posisi Rak', 'Stock Sistem App', 'Stock Rill (GSheet)', 'Selisih', 'UOM'];
+    const headers = ['Kode SKU', 'Nama Barang', 'Kategori', 'Posisi Rak', 'Stock Sistem App', 'Stock Rill (GSheet/CSV)', 'Selisih', 'UOM'];
     
     const rows = stockItems.map(item => {
       const realStockValue = parseFloat(realStockInputs[item.id]) || 0;
       const difference = item.systemStock - realStockValue;
       
       return [
-        `"${item.sku}"`,
-        `"${item.name}"`,
-        `"${item.category}"`,
-        `"${item.locatorId}"`,
+        item.sku,
+        item.name,
+        item.category.replace('_', ' '),
+        item.locatorId,
         item.systemStock,
         realStockValue,
         difference,
-        `"${item.uom}"`
-      ].join(',');
+        item.uom
+      ];
     });
 
-    const csvContent = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Stock Balance");
     
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `Stock_Balance_Export_${new Date().toISOString().slice(0, 10)}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    XLSX.writeFile(workbook, `Stock_Balance_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   const filteredItems = stockItems.filter(item => 
@@ -558,30 +555,32 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
         </div>
 
         {/* ACTIONS */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <button 
-            onClick={() => {
-              setTempUrl(gsheetUrl);
-              setIsSettingsOpen(true);
-            }}
-            className="px-3 py-2 hover:bg-slate-100 rounded-lg border border-slate-200 bg-white transition-colors flex items-center gap-1.5 text-xs font-bold text-slate-700 shadow-xs"
-            title="Ubah URL Google Sheet"
-          >
-            <Settings className="w-3.5 h-3.5 text-slate-500" />
-            Atur Link GSheet
-          </button>
+        {isSuperAdmin && (
+          <div className="flex items-center gap-2 flex-wrap">
+            <button 
+              onClick={() => {
+                setTempUrl(gsheetUrl);
+                setIsSettingsOpen(true);
+              }}
+              className="px-3 py-2 hover:bg-slate-100 rounded-lg border border-slate-200 bg-white transition-colors flex items-center gap-1.5 text-xs font-bold text-slate-700 shadow-xs"
+              title="Ubah URL Google Sheet"
+            >
+              <Settings className="w-3.5 h-3.5 text-slate-500" />
+              Atur Link GSheet
+            </button>
 
-          <label className="px-3 py-2 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 rounded-lg border border-slate-200 bg-white transition-colors flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer shadow-xs">
-            <Upload className="w-3.5 h-3.5 text-slate-500" />
-            <span>Upload CSV</span>
-            <input 
-              type="file" 
-              accept=".csv" 
-              onChange={handleCSVUpload} 
-              className="hidden" 
-            />
-          </label>
-        </div>
+            <label className="px-3 py-2 hover:bg-blue-50 hover:text-blue-700 hover:border-blue-200 rounded-lg border border-slate-200 bg-white transition-colors flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer shadow-xs">
+              <Upload className="w-3.5 h-3.5 text-slate-500" />
+              <span>Upload CSV</span>
+              <input 
+                type="file" 
+                accept=".csv" 
+                onChange={handleCSVUpload} 
+                className="hidden" 
+              />
+            </label>
+          </div>
+        )}
       </div>
 
       {/* NOTIFIKASI MESSAGE */}
@@ -683,8 +682,8 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                                 type="number"
                                 min="0"
                                 value={realStockValue}
-                                onChange={(e) => handleRealStockChange(item.id, e.target.value)}
-                                className="w-24 p-1 text-center font-bold font-mono text-sm border border-slate-300 rounded bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm"
+                                readOnly
+                                className="w-24 p-1 text-center font-bold font-mono text-sm border border-slate-300 rounded bg-slate-100 text-slate-500 cursor-not-allowed focus:outline-none shadow-sm"
                               />
                             </div>
                           </td>
