@@ -5,15 +5,18 @@ import { getRackDetailsByBarcode } from '../lib/db';
 import { getCurrentUser } from '../lib/auth';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
+import { motion, AnimatePresence } from 'motion/react';
 
 export function RackScanner() {
   const [scanResult, setScanResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
   const [loading, setLoading] = useState<boolean>(false);
   const [scannerActive, setScannerActive] = useState<boolean>(true);
+  const [showSuccessFlash, setShowSuccessFlash] = useState<boolean>(false);
   
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const user = getCurrentUser();
+
 
   useEffect(() => {
     if (scannerActive) {
@@ -77,6 +80,8 @@ export function RackScanner() {
       if (res.success) {
         setScanResult(res);
         setError('');
+        setShowSuccessFlash(true);
+        setTimeout(() => setShowSuccessFlash(false), 900);
         await recordScanHistory(decodedText, 'SUCCESS');
       } else {
         setError(res.message);
@@ -114,7 +119,7 @@ export function RackScanner() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col relative">
           <div className="p-4 bg-slate-50 border-b border-slate-200">
             <h3 className="font-bold text-slate-700 flex items-center gap-2">
               <ScanBarcode className="w-4 h-4 text-slate-500" /> Camera Preview
@@ -127,7 +132,7 @@ export function RackScanner() {
               <div className="text-center">
                 <button 
                   onClick={resetScanner}
-                  className="mx-auto flex flex-col items-center justify-center w-32 h-32 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors border border-blue-200"
+                  className="mx-auto flex flex-col items-center justify-center w-32 h-32 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors border border-blue-200 cursor-pointer shadow-sm"
                 >
                   <RefreshCw className="w-8 h-8 mb-2" />
                   <span className="font-bold text-sm">Scan Ulang</span>
@@ -135,9 +140,31 @@ export function RackScanner() {
               </div>
             )}
           </div>
+          
+          <AnimatePresence>
+            {showSuccessFlash && (
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: [0, 1, 1, 0] }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.9, times: [0, 0.15, 0.8, 1] }}
+                className="absolute inset-0 bg-emerald-500/15 flex items-center justify-center pointer-events-none z-40"
+              >
+                <div className="absolute inset-0 border-8 border-emerald-500 animate-pulse" />
+                <motion.div
+                  initial={{ scale: 0.4, opacity: 0 }}
+                  animate={{ scale: [0.4, 1.2, 1], opacity: 1 }}
+                  transition={{ duration: 0.4 }}
+                  className="bg-emerald-500 text-white rounded-full p-4 shadow-lg shadow-emerald-500/30 flex items-center justify-center"
+                >
+                  <CheckCircle2 className="w-12 h-12" />
+                </motion.div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
 
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden relative">
            <div className="p-4 bg-slate-50 border-b border-slate-200">
             <h3 className="font-bold text-slate-700 flex items-center gap-2">
               <Layers className="w-4 h-4 text-slate-500" /> Hasil Scan
@@ -145,52 +172,75 @@ export function RackScanner() {
           </div>
           <div className="flex-1 p-4">
             {loading && (
-              <div className="flex items-center justify-center h-full">
+              <div className="flex items-center justify-center h-full min-h-[300px]">
                 <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
               </div>
             )}
 
             {!loading && error && (
-              <div className="h-full flex flex-col justify-center text-center p-6 bg-red-50 rounded-xl border border-red-100">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="h-full min-h-[300px] flex flex-col justify-center text-center p-6 bg-red-50 rounded-xl border border-red-100"
+              >
                 <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-3" />
                 <h4 className="font-bold text-red-700 mb-1">Rack Tidak Ditemukan</h4>
                 <p className="text-red-600 text-sm">{error}</p>
-              </div>
+              </motion.div>
             )}
 
             {!loading && !scanResult && !error && (
-              <div className="h-full flex flex-col justify-center text-center p-6 text-slate-400">
+              <div className="h-full min-h-[300px] flex flex-col justify-center text-center p-6 text-slate-400">
                 <ScanBarcode className="w-16 h-16 mx-auto mb-3 opacity-20" />
                 <p>Arahkan kamera ke barcode rak.</p>
               </div>
             )}
 
             {!loading && scanResult && scanResult.success && (
-              <div className="space-y-6 animate-in fade-in zoom-in duration-300">
-                <div className="bg-emerald-50 rounded-xl p-4 border border-emerald-200 shadow-sm">
-                  <div className="flex items-center justify-between mb-4">
+              <motion.div 
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                className="space-y-6 text-left"
+              >
+                <motion.div 
+                  initial={{ scale: 0.98, opacity: 0 }}
+                  animate={{ scale: 1, opacity: 1 }}
+                  transition={{ delay: 0.05, duration: 0.3 }}
+                  className="bg-emerald-50 rounded-xl p-4 border border-emerald-200 shadow-sm relative overflow-hidden"
+                >
+                  <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full -mr-16 -mt-16 pointer-events-none" />
+                  <div className="flex items-center justify-between mb-4 relative z-10">
                     <div className="flex items-center gap-2">
-                      <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                      <motion.div
+                        initial={{ rotate: -10, scale: 0 }}
+                        animate={{ rotate: 0, scale: 1 }}
+                        transition={{ type: "spring", stiffness: 200, delay: 0.1 }}
+                      >
+                        <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                      </motion.div>
                       <h4 className="font-black text-emerald-800 text-lg">Rack: {scanResult.rack.code}</h4>
                     </div>
-                    <span className="bg-white px-3 py-1 rounded-full text-xs font-bold text-emerald-700 border border-emerald-200">
+                    <span className="bg-white px-3 py-1 rounded-full text-xs font-bold text-emerald-700 border border-emerald-200 font-mono">
                       Zone: {scanResult.rack.zone.replace('_', ' ')}
                     </span>
                   </div>
 
-                  <div className="space-y-2">
+                  <div className="space-y-2 relative z-10">
                     <div className="flex justify-between text-sm font-bold text-emerald-800">
                       <span>Kapasitas Digunakan</span>
                       <span>{scanResult.rack.usedCapacity.toFixed(2)} / {scanResult.rack.capacity} M³</span>
                     </div>
-                    <div className="w-full bg-emerald-200/50 rounded-full h-3">
-                      <div 
-                        className="bg-emerald-500 h-3 rounded-full transition-all duration-1000" 
-                        style={{ width: `${Math.min(100, (scanResult.rack.usedCapacity / scanResult.rack.capacity) * 100)}%` }}
-                      ></div>
+                    <div className="w-full bg-emerald-200/50 rounded-full h-3 overflow-hidden">
+                      <motion.div 
+                        initial={{ width: 0 }}
+                        animate={{ width: `${Math.min(100, (scanResult.rack.usedCapacity / scanResult.rack.capacity) * 100)}%` }}
+                        transition={{ delay: 0.2, duration: 0.8, ease: "easeOut" }}
+                        className="bg-emerald-500 h-3 rounded-full" 
+                      />
                     </div>
                   </div>
-                </div>
+                </motion.div>
 
                 <div>
                   <h4 className="font-bold text-slate-700 mb-3 text-sm flex items-center gap-2">
@@ -204,33 +254,42 @@ export function RackScanner() {
                     </div>
                   ) : (
                     <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
-                      {scanResult.items.map((item: any, idx: number) => (
-                        <div key={idx} className="bg-white border text-left border-slate-200 rounded-lg p-3 shadow-sm flex items-center justify-between hover:border-blue-300 transition-colors">
-                          <div className="min-w-0 pr-4">
-                            <p className="font-black text-blue-700 text-sm truncate">{item.sku}</p>
-                            <p className="text-xs text-slate-500 truncate">{item.name}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium border border-slate-200">
-                                Batch: {item.batch}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="text-right shrink-0 flex flex-col items-end">
-                            <span className="text-lg font-black text-slate-800 font-mono bg-slate-50 px-2 py-1 rounded border border-slate-200 inline-block mb-1">
-                              {item.qty} {item.uom || 'PCS'}
-                            </span>
-                            {item.packUom && item.packingSize && (
-                                <span className="text-[10px] text-slate-500 font-medium">
-                                  ({Math.floor(item.qty / item.packingSize)} {item.packUom} + {item.qty % item.packingSize} {item.uom})
+                      <AnimatePresence>
+                        {scanResult.items.map((item: any, idx: number) => (
+                          <motion.div 
+                            key={idx} 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0 }}
+                            transition={{ delay: 0.1 + idx * 0.05, duration: 0.25 }}
+                            className="bg-white border text-left border-slate-200 rounded-lg p-3 shadow-sm flex items-center justify-between hover:border-blue-300 transition-colors"
+                          >
+                            <div className="min-w-0 pr-4">
+                              <p className="font-black text-blue-700 text-sm truncate">{item.sku}</p>
+                              <p className="text-xs text-slate-500 truncate">{item.name}</p>
+                              <div className="flex items-center gap-2 mt-1">
+                                <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-medium border border-slate-200">
+                                  Batch: {item.batch}
                                 </span>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                              </div>
+                            </div>
+                            <div className="text-right shrink-0 flex flex-col items-end">
+                              <span className="text-lg font-black text-slate-800 font-mono bg-slate-50 px-2 py-1 rounded border border-slate-200 inline-block mb-1">
+                                {item.qty} {item.uom || 'PCS'}
+                              </span>
+                              {item.packUom && item.packingSize && (
+                                  <span className="text-[10px] text-slate-500 font-medium">
+                                    ({Math.floor(item.qty / item.packingSize)} {item.packUom} + {item.qty % item.packingSize} {item.uom})
+                                  </span>
+                              )}
+                            </div>
+                          </motion.div>
+                        ))}
+                      </AnimatePresence>
                     </div>
                   )}
                 </div>
-              </div>
+              </motion.div>
             )}
           </div>
         </div>

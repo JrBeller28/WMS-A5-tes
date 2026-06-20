@@ -15,7 +15,8 @@ import {
   UserPlus,
   Layers,
   ArrowRightLeft,
-  ScanBarcode
+  ScanBarcode,
+  Database
 } from 'lucide-react';
 import { getCurrentUser, logoutUser } from '../lib/auth';
 import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
@@ -132,6 +133,7 @@ export function Layout({
   if (user?.role === 'Developer') {
     tabs.push({ id: 'staff', label: 'Staff Management', icon: UserPlus });
     tabs.push({ id: 'rack', label: 'Manajemen Rak', icon: Layers });
+    tabs.push({ id: 'developer', label: 'Developer Tools', icon: Database });
   }
 
   return (

@@ -522,3 +522,26 @@ export const seedDatabase = async () => {
         console.error("Failed to seed db", err);
     }
 }
+
+export const resetStockAndTransactions = async () => {
+  const collectionsToDelete = ['products', 'transactions'];
+  for (const collName of collectionsToDelete) {
+    const snapshot = await getDocs(collection(db, collName));
+    let batch = writeBatch(db);
+    let count = 0;
+    
+    for (const docSnap of snapshot.docs) {
+      batch.delete(docSnap.ref);
+      count++;
+      if (count === 500) {
+        await batch.commit();
+        batch = writeBatch(db);
+        count = 0;
+      }
+    }
+    if (count > 0) {
+      await batch.commit();
+    }
+  }
+};
+

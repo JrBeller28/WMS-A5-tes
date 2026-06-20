@@ -23,6 +23,7 @@ const StaffManagement = lazy(() => import('./components/StaffManagement').then(m
 const RackManagement = lazy(() => import('./components/RackManagement').then(module => ({ default: module.RackManagement })));
 const MovingRack = lazy(() => import('./components/MovingRack').then(module => ({ default: module.MovingRack })));
 const RackScanner = lazy(() => import('./components/RackScanner').then(module => ({ default: module.RackScanner })));
+const DeveloperTools = lazy(() => import('./components/DeveloperTools').then(module => ({ default: module.DeveloperTools })));
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
@@ -128,6 +129,8 @@ export default function App() {
         return user?.role === 'Developer' ? <RackManagement /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'scanner':
         return <RackScanner />;
+      case 'developer':
+        return user?.role === 'Developer' ? <DeveloperTools /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       default: 
         return <Dashboard globalSearch={searchQuery} />;
     }

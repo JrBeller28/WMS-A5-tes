@@ -29,6 +29,8 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   const isSuperAdmin = userRoleClean === 'SUPER_ADMIN' || currentUser?.role?.toLowerCase() === 'super admin';
   const isKepalaGudangJkt = userRoleClean === 'KEPALA_GUDANG_JKT' || userRoleClean === 'KEPALA GUDANG JKT';
   
+  const canImportCSV = ['admin a5', 'super admin', 'developer'].includes(currentUser?.role?.trim().toLowerCase() || '');
+
   // Menggabungkan izin untuk melihat & mengeksekusi menu AKSI
   const hasActionAccess = isSuperAdmin || isKepalaGudangJkt;
 
@@ -303,10 +305,10 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   };
 
   const downloadTemplate = () => {
-    const csvContent = "data:text/csv;charset=utf-8,sku,name,category,volumeM3,uom,onHandQty,locatorId\n" +
-                       "P-PLUMB-001,Pipa PVC 2 Inch,FG_PLUMBING,0.015,PCS,10,A1.1\n" +
-                       "S-SMART-002,Water Flow Meter Digital,FG_SMART_WATER,0.008,BOX,5,B1.1\n" +
-                       "F-FIT-003,Sock Drat Dalam 1/2,FG_FITTING,0.002,PCS,20,C1.1";
+    const csvContent = "data:text/csv;charset=utf-8,sku,name,category,volumeM3,uom,packingSize,packUom\n" +
+                       "P-PLUMB-001,Pipa PVC 2 Inch,FG_PLUMBING,0.015,PCS,10,PACK\n" +
+                       "S-SMART-002,Water Flow Meter Digital,FG_SMART_WATER,0.008,BOX,5,CARTON\n" +
+                       "F-FIT-003,Sock Drat Dalam 1/2,FG_FITTING,0.002,PCS,20,PACK";
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -317,8 +319,8 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!isSuperAdmin) {
-      setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin yang berhak mengimpor file CSV.' });
+    if (!canImportCSV) {
+      setMessage({ type: 'error', text: 'Akses ditolak. Hanya Admin A5, Super Admin, dan Developer yang berhak mengimpor file CSV.' });
       e.target.value = '';
       return;
     }
@@ -332,57 +334,28 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
       const lines = text.split('\n');
       const itemsToImport: { product: Product; qty?: number; locatorId?: string }[] = [];
       const skippedRows: string[] = [];
-      const runningUsage = { ...locatorUsage };
 
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
-        const [sku, name, category, volumeM3, uom, onHandQtyVal, locatorIdVal] = line.split(',');
+        const [sku, name, category, volumeM3, uom, packingSizeVal, packUomVal] = line.split(',');
         if (sku && name && category && volumeM3) {
           const skuClean = sku.trim().toUpperCase();
           const pCategory = category.trim() as ZoneCategory;
-          const qty = onHandQtyVal ? parseInt(onHandQtyVal.trim(), 10) : 0;
-          const locId = locatorIdVal ? locatorIdVal.trim().toUpperCase() : '';
+          const packingSize = packingSizeVal ? parseInt(packingSizeVal.trim(), 10) : undefined;
+          const packUom = packUomVal ? packUomVal.trim().toUpperCase() : undefined;
 
-          let isValidLoc = true;
-          if (qty > 0 && locId) {
-            const matchedLoc = locators.find(l => l.id === locId);
-            if (!matchedLoc) {
-              isValidLoc = false;
-              skippedRows.push(`Baris ${i + 1} (${skuClean}): Slot "${locId}" tidak terdaftar`);
-            } else if (matchedLoc.zone !== pCategory && !matchedLoc.rack.startsWith('FL')) {
-              isValidLoc = false;
-              skippedRows.push(`Baris ${i + 1} (${skuClean}): Slot "${locId}" di zona ${matchedLoc.zone} tidak sesuai dengan produk (${pCategory})`);
-            } else {
-              // Validasi kapasitas rak slot berdasarkan akumulasi volume
-              const productVol = parseFloat(volumeM3.trim()) || 0;
-              const requiredVol = qty * productVol;
-              const currentUsage = runningUsage[locId] || 0;
-              const remainingVol = matchedLoc.maxVolumeM3 - currentUsage;
-
-              if (requiredVol > remainingVol) {
-                isValidLoc = false;
-                const maxPcsPossible = productVol > 0 ? Math.floor(remainingVol / productVol) : 0;
-                skippedRows.push(`Baris ${i + 1} (SKU: ${skuClean}) ❌ Gagal ke Slot "${locId}": Kapasitas tidak cukup (Sisa: ${remainingVol.toFixed(4)} m³, Butuh: ${requiredVol.toFixed(4)} m³).\n   👉 Slot ini hanya muat maksimal ${maxPcsPossible} PCS produk ini.`);
-              } else {
-                runningUsage[locId] = currentUsage + requiredVol;
-              }
+          itemsToImport.push({
+            product: {
+              sku: skuClean,
+              name: name.trim(),
+              category: pCategory,
+              volumeM3: parseFloat(volumeM3.trim()),
+              uom: uom ? uom.trim().toUpperCase() : 'PCS',
+              packingSize: packingSize && !isNaN(packingSize) ? packingSize : undefined,
+              packUom: packUom || undefined
             }
-          }
-
-          if (isValidLoc) {
-            itemsToImport.push({
-              product: {
-                sku: skuClean,
-                name: name.trim(),
-                category: pCategory,
-                volumeM3: parseFloat(volumeM3.trim()),
-                uom: uom ? uom.trim().toUpperCase() : 'PCS'
-              },
-              qty: qty > 0 ? qty : undefined,
-              locatorId: locId || undefined
-            });
-          }
+          });
         }
       }
 
@@ -396,7 +369,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
               await addProductsBatchWithStock(newItems, operatorName);
           }
           
-          let alertText = `Berhasil mengimpor data: ${newItems.length} SKU baru ditambahkan (termasuk stok on-hand jika ada). ${itemsToImport.length - newItems.length} SKU dilewati karena duplikat.`;
+          let alertText = `Berhasil mengimpor data: ${newItems.length} SKU baru ditambahkan ke database. ${itemsToImport.length - newItems.length} SKU dilewati karena duplikat.`;
           if (skippedRows.length > 0) {
             alertText += `\n\nDetail Baris yang Dilompati / Gagal:\n` + skippedRows.join('\n');
           }
@@ -467,7 +440,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
             Unduh Template CSV
           </button>
           
-          {isSuperAdmin ? (
+          {canImportCSV ? (
             <label className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-blue-50 border border-blue-200 text-blue-700 text-xs font-bold rounded-lg hover:bg-blue-100 transition-colors shadow-sm cursor-pointer w-full sm:w-auto">
               <Upload className="w-4 h-4" />
               <span>Import CSV</span>
@@ -483,7 +456,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
               type="button"
               disabled
               className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-slate-100 border border-slate-200 text-slate-400 text-xs font-bold rounded-lg opacity-60 cursor-not-allowed w-full sm:w-auto"
-              title="Fitur import hanya tersedia untuk Super Admin"
+              title="Fitur import hanya tersedia untuk Admin A5, Super Admin, dan Developer"
             >
               <Upload className="w-4 h-4" />
               Import CSV (Terproteksi)
