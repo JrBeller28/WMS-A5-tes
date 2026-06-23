@@ -154,7 +154,7 @@ export function Layout({
           <div>
             <h1 className="text-2xl font-bold text-blue-700 flex items-center gap-2">
               <Building2 className="w-6 h-6" />
-              Gudang PSN
+              Gudang A5
             </h1>
             <p className="text-sm text-slate-500 mt-1">Warehouse Operations</p>
           </div>

@@ -170,7 +170,7 @@ export function WarehouseVisualizer() {
           </div>
           <div>
             <h2 className="text-base sm:text-lg font-black tracking-tight text-slate-800 uppercase">
-              Visualisasi Zonasi Layout & Raks (Gudang PSN)
+              Visualisasi Zonasi Layout & Raks (Gudang A5)
             </h2>
             <p className="text-xs text-slate-500">Klik Rak pada denah lantai untuk membuka elevasi rak (Front View Grid) & detail slot locator.</p>
           </div>

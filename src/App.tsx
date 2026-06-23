@@ -10,6 +10,7 @@ import { getCurrentUser, logoutUser } from './lib/auth';
 import { doc, onSnapshot } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { onAuthStateChanged } from 'firebase/auth';
+import { SplashScreen } from './components/SplashScreen';
 
 // Lazy loading components to optimize performance limit JS initial payload
 const Dashboard = lazy(() => import('./components/Dashboard').then(module => ({ default: module.Dashboard })));
@@ -31,6 +32,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState(''); // 1. Tambahkan state untuk menampung kata kunci pencarian
   const [init, setInit] = useState(false);
   const [user, setUser] = useState<{username: string, role: string, name: string, sessionId?: string} | null>(null);
+  const [showSplash, setShowSplash] = useState(true);
 
   useEffect(() => {
     // 1. Ambil cached user dari localStorage untuk respon cepat di awal
@@ -89,6 +91,10 @@ export default function App() {
       <div className="w-8 h-8 flex border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin"></div>
     </div>
   );
+
+  if (showSplash) {
+    return <SplashScreen onComplete={() => setShowSplash(false)} />;
+  }
 
   if (!user) {
     return (

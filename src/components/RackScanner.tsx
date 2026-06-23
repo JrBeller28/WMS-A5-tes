@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
-import { ScanBarcode, Layers, AlertTriangle, CheckCircle2, RefreshCw, X, Box } from 'lucide-react';
+import { ScanBarcode, Layers, AlertTriangle, CheckCircle2, RefreshCw, X, Box, Plus, Minus } from 'lucide-react';
 import { getRackDetailsByBarcode, savePhysicalStockCount } from '../lib/db';
 import { getCurrentUser } from '../lib/auth';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
@@ -18,6 +18,26 @@ export function RackScanner() {
   
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const user = getCurrentUser();
+
+  const handleQtyChange = (idx: number, newQty: number) => {
+    if (newQty < 0) return;
+    setScanResult((prev: any) => {
+      if (!prev) return prev;
+      const updatedItems = [...prev.items];
+      const targetItem = updatedItems[idx];
+      const originalQty = targetItem.originalQty !== undefined ? targetItem.originalQty : targetItem.qty;
+      
+      updatedItems[idx] = {
+        ...targetItem,
+        qty: newQty,
+        originalQty
+      };
+      return {
+        ...prev,
+        items: updatedItems
+      };
+    });
+  };
 
   const handleConfirmStock = async () => {
     if (!scanResult || !scanResult.rack) return;
@@ -299,12 +319,40 @@ export function RackScanner() {
                                 </span>
                               </div>
                             </div>
-                            <div className="text-right shrink-0 flex flex-col items-end">
-                              <span className="text-lg font-black text-slate-800 font-mono bg-slate-50 px-2 py-1 rounded border border-slate-200 inline-block mb-1">
-                                {item.qty} {item.uom || 'PCS'}
-                              </span>
+                            <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                              <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5 border border-slate-200">
+                                <button
+                                  type="button"
+                                  onClick={() => handleQtyChange(idx, Math.max(0, item.qty - 1))}
+                                  className="p-1 text-slate-500 hover:bg-slate-200 rounded cursor-pointer transition-colors"
+                                  title="Kurangi Qty"
+                                >
+                                  <Minus className="w-3.5 h-3.5" />
+                                </button>
+                                <input
+                                  type="number"
+                                  value={item.qty}
+                                  onChange={(e) => handleQtyChange(idx, parseInt(e.target.value) || 0)}
+                                  className="w-16 text-center bg-white border border-slate-200 rounded font-bold font-mono text-xs focus:ring-1 focus:ring-blue-500 outline-none p-1 text-slate-800"
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleQtyChange(idx, item.qty + 1)}
+                                  className="p-1 text-slate-500 hover:bg-slate-200 rounded cursor-pointer transition-colors"
+                                  title="Tambah Qty"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                                <span className="text-xs font-bold text-slate-500 px-1.5">{item.uom || 'PCS'}</span>
+                              </div>
+                              {item.originalQty !== undefined && item.qty !== item.originalQty && (
+                                <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 flex items-center gap-1 animate-pulse">
+                                  <AlertTriangle className="w-2.5 h-2.5" />
+                                  Ada Perbedaan: {item.qty - item.originalQty > 0 ? '+' : ''}{item.qty - item.originalQty} {item.uom || 'PCS'}
+                                </span>
+                              )}
                               {item.packUom && item.packingSize && (
-                                  <span className="text-[10px] text-slate-500 font-medium">
+                                  <span className="text-[10px] text-slate-400 font-medium">
                                     ({Math.floor(item.qty / item.packingSize)} {item.packUom} + {item.qty % item.packingSize} {item.uom})
                                   </span>
                               )}

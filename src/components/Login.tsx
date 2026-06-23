@@ -32,7 +32,7 @@ export const Login = ({ onLogin }: { onLogin: () => void }) => {
           <div className="mx-auto bg-white/20 w-16 h-16 rounded-2xl flex items-center justify-center mb-4 backdrop-blur-sm">
             <PackageOpen className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-black uppercase tracking-widest text-[#F1B122]">GUDANG PSN</h1>
+          <h1 className="text-2xl font-black uppercase tracking-widest text-[#F1B122]">GUDANG A5</h1>
           <p className="text-white/80 text-sm mt-2 font-medium">Warehouse Management System</p>
         </div>
 
