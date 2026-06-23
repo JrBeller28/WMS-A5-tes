@@ -24,6 +24,7 @@ const RackManagement = lazy(() => import('./components/RackManagement').then(mod
 const MovingRack = lazy(() => import('./components/MovingRack').then(module => ({ default: module.MovingRack })));
 const RackScanner = lazy(() => import('./components/RackScanner').then(module => ({ default: module.RackScanner })));
 const DeveloperTools = lazy(() => import('./components/DeveloperTools').then(module => ({ default: module.DeveloperTools })));
+const ControlStock = lazy(() => import('./components/ControlStock').then(module => ({ default: module.ControlStock })));
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
@@ -113,6 +114,8 @@ export default function App() {
         return <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'inventory': 
         return <Inventory globalSearch={searchQuery} />; // 3. Kirim kata kunci lewat prop 'globalSearch'
+      case 'controlstock':
+        return <ControlStock searchQuery={searchQuery} />;
       case 'inbound': 
         return <Inbound globalSearch={searchQuery} />;
       case 'outbound': 

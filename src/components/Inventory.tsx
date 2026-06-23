@@ -790,7 +790,6 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">PACKAGING / UOM</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">POSISI RAK (SLOT)</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">DIMENSI (VOL/BERAT)</th>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">JUMLAH ON HAND</th>
               {hasActionAccess && (
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">AKSI</th>
               )}
@@ -840,9 +839,6 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
                   <td className="px-6 py-4">
                     <div className="text-sm font-bold text-slate-700 font-mono">{p.volumeM3} m³</div>
                     <div className="text-xs text-slate-400 mt-0.5">{weightEstimate} Kg</div>
-                  </td>
-                  <td className="px-6 py-4 text-sm font-bold font-mono text-slate-700">
-                    {onHandQty} {p.uom}
                   </td>
                   
                   {hasActionAccess && (

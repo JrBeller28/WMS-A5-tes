@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
 import { ScanBarcode, Layers, AlertTriangle, CheckCircle2, RefreshCw, X, Box } from 'lucide-react';
-import { getRackDetailsByBarcode } from '../lib/db';
+import { getRackDetailsByBarcode, savePhysicalStockCount } from '../lib/db';
 import { getCurrentUser } from '../lib/auth';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -13,9 +13,35 @@ export function RackScanner() {
   const [loading, setLoading] = useState<boolean>(false);
   const [scannerActive, setScannerActive] = useState<boolean>(true);
   const [showSuccessFlash, setShowSuccessFlash] = useState<boolean>(false);
+  const [confirmingLocId, setConfirmingLocId] = useState<string | null>(null);
+  const [confirmedStatus, setConfirmedStatus] = useState<boolean>(false);
   
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const user = getCurrentUser();
+
+  const handleConfirmStock = async () => {
+    if (!scanResult || !scanResult.rack) return;
+    setConfirmingLocId(scanResult.rack.code);
+    setConfirmedStatus(false);
+    
+    try {
+      if (scanResult.items && scanResult.items.length > 0) {
+        for (const item of scanResult.items) {
+          await savePhysicalStockCount(scanResult.rack.code, item.sku, item.qty);
+        }
+      } else {
+        // If the rack is empty, maybe we don't save or we save a blank? We'll just confirm no action or something. 
+        // For now, if empty, we just mark it confirmed.
+      }
+      setConfirmedStatus(true);
+      setTimeout(() => setConfirmedStatus(false), 3000);
+    } catch (err) {
+      console.error(err);
+      setError('Gagal mengkonfirmasi stok.');
+    } finally {
+      setConfirmingLocId(null);
+    }
+  };
 
 
   useEffect(() => {
@@ -288,6 +314,29 @@ export function RackScanner() {
                       </AnimatePresence>
                     </div>
                   )}
+                  
+                  {user?.role === 'Developer' || user?.role === 'Supervisor' || user?.role === 'Admin' ? (
+                    <div className="pt-2 mt-4 border-t border-slate-100 flex justify-end">
+                      <button
+                        onClick={handleConfirmStock}
+                        disabled={confirmingLocId !== null || confirmedStatus || scanResult.items.length === 0}
+                        className={`flex items-center gap-2 px-4 py-2 text-sm font-bold rounded-lg shadow-sm transition-colors ${
+                          confirmedStatus 
+                            ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' 
+                            : 'bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50'
+                        }`}
+                      >
+                        {confirmingLocId !== null ? (
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                        ) : confirmedStatus ? (
+                          <CheckCircle2 className="w-4 h-4" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4" />
+                        )}
+                        <span>{confirmedStatus ? 'Stock Terkonfirmasi' : 'Konfirmasi Stock (Fisik Sesuai Sistem)'}</span>
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
               </motion.div>
             )}

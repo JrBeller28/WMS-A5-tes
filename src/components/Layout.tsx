@@ -16,7 +16,8 @@ import {
   Layers,
   ArrowRightLeft,
   ScanBarcode,
-  Database
+  Database,
+  ClipboardList
 } from 'lucide-react';
 import { getCurrentUser, logoutUser } from '../lib/auth';
 import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
@@ -118,7 +119,8 @@ export function Layout({
 
   const tabs = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'inventory', label: 'Stock Overview', icon: Box },
+    { id: 'inventory', label: 'Master Data', icon: Box },
+    { id: 'controlstock', label: 'Control Stock', icon: ClipboardList },
     { id: 'inbound', label: 'Inbound', icon: LogIn },
     { id: 'outbound', label: 'Outbound', icon: LogOut },
     { id: 'ledger', label: 'Stock Ledger', icon: History },

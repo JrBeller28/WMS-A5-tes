@@ -42,6 +42,9 @@ export interface Transaction {
   timestamp: string;
   status: TransactionStatus;
   memo?: string;
+  transferToLocatorId?: string;
+  batch?: string;
+  bookingRef?: string;
 }
 
 export interface InventoryItem {

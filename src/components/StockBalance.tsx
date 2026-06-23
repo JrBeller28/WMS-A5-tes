@@ -16,7 +16,7 @@ import {
   FileSpreadsheet
 } from 'lucide-react';
 import { Product } from '../types';
-import { getProducts, getInventoryDetails, updateProduct } from '../lib/db'; 
+import { getProducts, getInventoryDetails, updateProduct, getPhysicalStockCounts } from '../lib/db'; 
 import { getCurrentUser } from '../lib/auth';
 
 interface StockBalanceItem {
@@ -119,7 +119,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
   const fetchStockData = async () => {
     setLoading(true);
     try {
-      const [prods, invDetails] = await Promise.all([getProducts(), getInventoryDetails()]);
+      const [prods, invDetails, physicalCounts] = await Promise.all([getProducts(), getInventoryDetails(), getPhysicalStockCounts()]);
       
       // Objek Map untuk menampung data dari Google Sheets
       const gsheetMapping: Record<string, string> = {};
@@ -237,8 +237,12 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                 packingSize: p.packingSize,
               });
               
-              // Set Stock Rill mengambil dari kolom 'Stock Sistem' jika berhasil dicocokkan
-              initialInputs[uniqueId] = matchedGsheetValue !== undefined ? matchedGsheetValue : data.physicalQty.toString();
+              // Prioritize physical scanner count, then gsheet, then system
+              if (physicalCounts[uniqueId] !== undefined) {
+                initialInputs[uniqueId] = physicalCounts[uniqueId].toString();
+              } else {
+                initialInputs[uniqueId] = matchedGsheetValue !== undefined ? matchedGsheetValue : data.physicalQty.toString();
+              }
             }
           });
         } else {
@@ -254,7 +258,12 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
             packUom: p.packUom,
             packingSize: p.packingSize,
           });
-          initialInputs[uniqueId] = matchedGsheetValue !== undefined ? matchedGsheetValue : '0';
+          
+          if (physicalCounts[uniqueId] !== undefined) {
+             initialInputs[uniqueId] = physicalCounts[uniqueId].toString();
+          } else {
+             initialInputs[uniqueId] = matchedGsheetValue !== undefined ? matchedGsheetValue : '0';
+          }
         }
       });
 

@@ -523,6 +523,34 @@ export const seedDatabase = async () => {
     }
 }
 
+export const savePhysicalStockCount = async (locatorId: string, sku: string, qty: number) => {
+  try {
+    const docId = `${locatorId}_${sku}`;
+    await setDoc(doc(db, 'physical_stock_counts', docId), {
+      locatorId,
+      sku,
+      qty,
+      updatedAt: serverTimestamp()
+    });
+  } catch (err) {
+    console.error("Error saving physical count:", err);
+  }
+};
+
+export const getPhysicalStockCounts = async () => {
+  try {
+    const snapshot = await getDocs(collection(db, 'physical_stock_counts'));
+    const counts: Record<string, number> = {};
+    snapshot.forEach(doc => {
+      counts[doc.id] = doc.data().qty;
+    });
+    return counts;
+  } catch (err) {
+    console.error("Error getting physical counts:", err);
+    return {};
+  }
+};
+
 export const resetStockAndTransactions = async () => {
   const collectionsToDelete = ['products', 'transactions'];
   for (const collName of collectionsToDelete) {
