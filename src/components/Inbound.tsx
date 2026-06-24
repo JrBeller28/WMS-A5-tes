@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Camera, Shield, CheckCircle2, AlertCircle, Zap, Trash2, Printer, Eye, X, QrCode } from 'lucide-react';
 import { Product, Locator, Transaction } from '../types';
-import { getProducts, getPutawayRecommendations, addTransaction, getTransactions, getInventoryDetails, getLocators } from '../lib/db';
+import { getProducts, getPutawayRecommendations, addTransaction, getTransactions, getInventoryDetails, getLocators, getPreferredRacksForCategory } from '../lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentUser } from '../lib/auth';
 import { QRScanner } from './QRScanner';
@@ -88,7 +88,8 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
 
   const compatibleLocators = locators.filter(l => {
     if (!productDetails?.category) return true;
-    return l.zone === productDetails.category || l.rack.startsWith('FL');
+    const preferred = getPreferredRacksForCategory(productDetails.category);
+    return preferred.includes(l.rack);
   });
 
   // Validasi otomatis saat SKU dipilih
@@ -130,7 +131,11 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
     setLoading(true);
     try {
       const recs = await getPutawayRecommendations(selectedSku, unallocatedQty);
-      const filteredRecs = recs.filter(r => !productDetails?.category || r.zone === productDetails.category || r.rack.startsWith('FL'));
+      const filteredRecs = recs.filter(r => {
+        if (!productDetails?.category) return true;
+        const preferred = getPreferredRacksForCategory(productDetails.category);
+        return preferred.includes(r.rack);
+      });
       setRecommendations(filteredRecs);
     } catch (e: any) {
       console.error(e);

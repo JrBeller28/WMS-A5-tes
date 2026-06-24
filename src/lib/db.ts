@@ -523,6 +523,29 @@ export const transferInventory = async (sku: string, fromLocatorId: string, toLo
   clearCache('transactions');
 };
 
+export const getPreferredRacksForCategory = (category: string): string[] => {
+  const cat = (category || '').trim().toUpperCase();
+  if (cat === 'PLUMBING' || cat === 'FG_PLUMBING' || cat.includes('PLUMBING')) {
+    return ['R1', 'FL-A', 'FL-B'];
+  }
+  if (cat === 'FILTER' || cat === 'FG_FILTER' || cat.includes('FILTER')) {
+    return ['R2', 'R3'];
+  }
+  if (cat === 'SMART WATER' || cat === 'FG_SMART_WATER' || cat.includes('SMART WATER') || cat.includes('SMART_WATER')) {
+    return ['R4', 'FL-E', 'FL-F'];
+  }
+  if (cat === 'FITTING' || cat === 'FG_FITTING' || cat.includes('FITTING')) {
+    return ['R5', 'FL-E', 'FL-F'];
+  }
+  if (cat === 'PACKAGING MATERIALS' || cat === 'PACKAGING_MATERIALS' || cat === 'FG AKSESORIS' || cat === 'FG_AKSESORIS' || cat.includes('PACKAGING') || cat.includes('AKSESORIS')) {
+    return ['R6'];
+  }
+  if (cat === 'FG_OTO_VALVE' || cat === 'FG_WATER_FILTER' || cat === 'PERSEDIAAN PART MESIN' || cat.includes('VALVE') || cat.includes('WATER_FILTER') || cat.includes('PART_MESIN') || cat.includes('PART MESIN') || cat.includes('PERS_PART')) {
+    return ['R7'];
+  }
+  return ['R8'];
+};
+
 export const getPutawayRecommendations = async (sku: string, qty: number) => {
     const products = await getProducts();
     const locators = await getLocators();
@@ -562,13 +585,7 @@ export const getPutawayRecommendations = async (sku: string, qty: number) => {
       });
     };
 
-    let preferredRacks: string[] = [];
-    if (product.category === 'FG_PLUMBING') preferredRacks = ['R1'];
-    else if (product.category === 'FG_SMART_WATER') preferredRacks = ['R2'];
-    else if (product.category === 'FG_FITTING') preferredRacks = ['R3'];
-    else if (product.category === 'FG_FILTER') preferredRacks = ['R4', 'R5'];
-    else if (product.category === 'PACKAGING_MATERIALS') preferredRacks = ['R6', 'R7'];
-    else if (product.category === 'ASSEMBLY_KIT') preferredRacks = ['R8'];
+    const preferredRacks = getPreferredRacksForCategory(product.category);
 
     const preferredLocators = locators.filter(l => preferredRacks.includes(l.rack));
     let availableLocators = getAvailable(preferredLocators);

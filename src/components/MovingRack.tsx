@@ -12,30 +12,30 @@ interface DragItem {
   volumeM3: number;
 }
 
-const ZONE_COLORS: Record<ZoneCategory | string, { text: string; bg: string; border: string; label: string }> = {
-  'FG_PLUMBING': { text: 'text-emerald-500', bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'Plumbing' },
-  'FG_SMART_WATER': { text: 'text-blue-400', bg: 'bg-blue-50', border: 'border-blue-200', label: 'Smart Water' },
-  'FG_FITTING': { text: 'text-indigo-400', bg: 'bg-indigo-50', border: 'border-indigo-200', label: 'Fitting' },
-  'FG_FILTER': { text: 'text-amber-500', bg: 'bg-amber-50', border: 'border-amber-200', label: 'Filter' },
-  'PACKAGING_MATERIALS': { text: 'text-orange-400', bg: 'bg-orange-50', border: 'border-orange-200', label: 'Bahan Packing' },
-  'ASSEMBLY_KIT': { text: 'text-purple-500', bg: 'bg-purple-50', border: 'border-purple-200', label: 'Manufacture' },
-  'SPECIFIC_AREA': { text: 'text-rose-500', bg: 'bg-rose-50', border: 'border-rose-200', label: 'R9 Spesifik' },
-  'DEFAULT': { text: 'text-slate-400', bg: 'bg-slate-50', border: 'border-slate-200', label: 'Unknown' },
+const ZONE_COLORS: Record<string, { text: string; bg: string; border: string; label: string }> = {
+  'PLUMBING': { text: 'text-emerald-500', bg: 'bg-emerald-50', border: 'border-emerald-200', label: 'Plumbing (R1 & FL A-B)' },
+  'FILTER': { text: 'text-amber-500', bg: 'bg-amber-50', border: 'border-amber-200', label: 'Filter (R2 & R3)' },
+  'SMART_WATER': { text: 'text-blue-400', bg: 'bg-blue-50', border: 'border-blue-200', label: 'Smart Water (R4 & FL E-F)' },
+  'FITTING': { text: 'text-indigo-400', bg: 'bg-indigo-50', border: 'border-indigo-200', label: 'Fitting (R5 & FL E-F)' },
+  'PACKAGING_MATERIALS': { text: 'text-orange-400', bg: 'bg-orange-50', border: 'border-orange-200', label: 'Bahan Packing / FG Aksesoris (R6)' },
+  'FG_OTO_VALVE': { text: 'text-rose-500', bg: 'bg-rose-50', border: 'border-rose-200', label: 'Oto Valve, Water Filter, Part Mesin (R7)' },
+  'ASSEMBLY_KIT': { text: 'text-purple-500', bg: 'bg-purple-50', border: 'border-purple-200', label: 'Sisanya (R8)' },
+  'DEFAULT': { text: 'text-slate-400', bg: 'bg-slate-50', border: 'border-slate-200', label: 'Buffer / Floating' },
 };
 
 const RACK_LAYOUT = [
-  { id: 'FL A-B', label: 'Rack FL-A (A1.1 - A5.4) & Rack FL-B (B1.1 - B5.4)', racks: ['FL-A', 'FL-B'], zone: 'DEFAULT' },
+  { id: 'FL A-B', label: 'Rack FL-A (A1.1 - A5.4) & Rack FL-B (B1.1 - B5.4)', racks: ['FL-A', 'FL-B'], zone: 'PLUMBING' },
   { id: 'FL C-D', label: 'Rack FL-C (C1.1 - C5.4) & Rack FL-D (D1.1 - D5.4)', racks: ['FL-C', 'FL-D'], zone: 'DEFAULT' },
-  { id: 'FL E-F', label: 'Rack FL-E (E1.1 - E5.4) & Rack FL-F (F1.1 - F5.4)', racks: ['FL-E', 'FL-F'], zone: 'DEFAULT' },
+  { id: 'FL E-F', label: 'Rack FL-E (E1.1 - E5.4) & Rack FL-F (F1.1 - F5.4)', racks: ['FL-E', 'FL-F'], zone: 'SMART_WATER' },
   { id: 'FL G-H', label: 'Rack FL-G (G1.1 - G5.4) & Rack FL-H (H1.1 - H5.4)', racks: ['FL-G', 'FL-H'], zone: 'DEFAULT' },
   { id: 'FL-I', label: 'Rack FL-I (I1.1 - I5.4)', racks: ['FL-I'], zone: 'DEFAULT' },
-  { id: 'R1', label: 'Rack R1 (A1 - A10)', zone: 'FG_PLUMBING', racks: ['R1'] },
-  { id: 'R2', label: 'Rack R2 (B1 - B9)', zone: 'FG_SMART_WATER', racks: ['R2'] },
-  { id: 'R3', label: 'Rack R3 (C1-C9 & D1-D9)', zone: 'FG_FITTING', racks: ['R3'] },
-  { id: 'R4', label: 'Rack R4 (E1 - E9)', zone: 'FG_FILTER', racks: ['R4'] },
-  { id: 'R5', label: 'Rack R5 (F1 - F9)', zone: 'FG_FILTER', racks: ['R5'] },
+  { id: 'R1', label: 'Rack R1 (A1 - A10)', zone: 'PLUMBING', racks: ['R1'] },
+  { id: 'R2', label: 'Rack R2 (B1 - B9)', zone: 'FILTER', racks: ['R2'] },
+  { id: 'R3', label: 'Rack R3 (C1-C9 & D1-D9)', zone: 'FILTER', racks: ['R3'] },
+  { id: 'R4', label: 'Rack R4 (E1 - E9)', zone: 'SMART_WATER', racks: ['R4'] },
+  { id: 'R5', label: 'Rack R5 (F1 - F9)', zone: 'FITTING', racks: ['R5'] },
   { id: 'R6', label: 'Rack R6 (G1 - G9)', zone: 'PACKAGING_MATERIALS', racks: ['R6'] },
-  { id: 'R7', label: 'Rack R7 (H1 - H9)', zone: 'PACKAGING_MATERIALS', racks: ['R7'] },
+  { id: 'R7', label: 'Rack R7 (H1 - H9)', zone: 'FG_OTO_VALVE', racks: ['R7'] },
   { id: 'R8', label: 'Rack R8 (I1 - I9)', zone: 'ASSEMBLY_KIT', racks: ['R8'] },
 ];
 

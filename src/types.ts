@@ -75,7 +75,7 @@ export interface Product {
   companyId?: string; // TEANT ID
   warehouseId?: string;
   name: string;
-  category: ZoneCategory;
+  category: string;
   volumeM3: number;
   uom: string;
   packUom?: string;
