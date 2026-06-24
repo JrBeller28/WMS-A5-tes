@@ -180,7 +180,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
 
   const handleSlotGridClick = (locId: string) => {
     if (!selectedSku) {
-      setMessage({ type: 'error', text: 'Tentukan SKU barang terlebih dahulu.' });
+      setMessage({ type: 'error', text: 'Tentukan Kode barang terlebih dahulu.' });
       return;
     }
 
@@ -218,7 +218,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
 
     const maxQtyForThisSlot = Math.floor(availableVol / unitVolume);
     if (maxQtyForThisSlot <= 0) {
-      setMessage({ type: 'error', text: `Sisa volume di Slot ${locId} tidak cukup untuk ukuran 1 unit SKU ini.` });
+      setMessage({ type: 'error', text: `Sisa volume di Slot ${locId} tidak cukup untuk ukuran 1 unit Kode ini.` });
       return;
     }
 
@@ -457,14 +457,14 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs text-slate-600 mb-1 font-semibold">SKU Barang</label>
+                  <label className="block text-xs text-slate-600 mb-1 font-semibold">Kode Barang</label>
                   <div className="flex gap-2">
                     <select 
                       value={selectedSku} 
                       onChange={e => setSelectedSku(e.target.value)}
                       className="flex-1 p-2 border border-slate-300 rounded text-xs bg-white outline-none focus:border-blue-500"
                     >
-                      <option value="">-- Pilih SKU Material --</option>
+                      <option value="">-- Pilih Kode Material --</option>
                       {products.map(p => (
                         <option key={p.sku} value={p.sku}>{p.sku} - {p.name}</option>
                       ))}
@@ -472,7 +472,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
                     <button 
                       onClick={() => setShowScanner(true)}
                       className="px-3 bg-blue-50 border border-blue-200 rounded text-blue-600 hover:bg-blue-100 transition-colors flex items-center justify-center shrink-0"
-                      title="Scan QR Code SKU"
+                      title="Scan QR Code Kode"
                     ><QrCode className="w-4 h-4" /></button>
                   </div>
                 </div>
@@ -748,7 +748,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
               <table className="w-full text-left border-collapse text-[10px]">
                 <thead>
                   <tr className="border-b border-black align-bottom">
-                    <th className="py-1 font-bold w-[25%]">ITEM<br />SKU</th>
+                    <th className="py-1 font-bold w-[25%]">KODE<br />BARANG</th>
                     <th className="py-1 font-bold w-[30%]">NAMA<br />PRODUK</th>
                     <th className="py-1 font-bold text-center w-[15%]">KUANTITAS<br />MASUK</th>
                     <th className="py-1 font-bold text-center w-[15%]">VOLUME<br />TERPAKAI</th>
@@ -818,7 +818,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold">
                   <th className="p-2.5">Waktu Transaksi</th>
-                  <th className="p-2.5">Item SKU</th>
+                  <th className="p-2.5">Kode Barang</th>
                   <th className="p-2.5 text-center">Total Qty</th>
                   <th className="p-2.5">Alokasi Slot Rak</th>
                   <th className="p-2.5">Operator</th>
@@ -916,7 +916,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
           <table className="w-full text-left border-collapse text-[10px]">
             <thead>
               <tr className="border-b border-black align-bottom">
-                <th className="py-1 font-bold w-[25%]">ITEM<br />SKU</th>
+                <th className="py-1 font-bold w-[25%]">KODE<br />BARANG</th>
                 <th className="py-1 font-bold w-[30%]">NAMA<br />PRODUK</th>
                 <th className="py-1 font-bold text-center w-[15%]">KUANTITAS<br />MASUK</th>
                 <th className="py-1 font-bold text-center w-[15%]">VOLUME<br />TERPAKAI</th>
@@ -962,9 +962,9 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
             if (found) {
               setSelectedSku(found.sku);
               setShowScanner(false);
-              setMessage({ type: 'success', text: `Berhasil scan SKU: ${found.sku}` });
+              setMessage({ type: 'success', text: `Berhasil scan Kode: ${found.sku}` });
             } else {
-              setMessage({ type: 'error', text: `SKU atau Barcode tidak ditemukan: ${text}` });
+              setMessage({ type: 'error', text: `Kode atau Barcode tidak ditemukan: ${text}` });
               setShowScanner(false);
             }
           }} 

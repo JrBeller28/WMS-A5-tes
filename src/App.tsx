@@ -26,6 +26,9 @@ const MovingRack = lazy(() => import('./components/MovingRack').then(module => (
 const RackScanner = lazy(() => import('./components/RackScanner').then(module => ({ default: module.RackScanner })));
 const DeveloperTools = lazy(() => import('./components/DeveloperTools').then(module => ({ default: module.DeveloperTools })));
 const ControlStock = lazy(() => import('./components/ControlStock').then(module => ({ default: module.ControlStock })));
+const BillingMenu = lazy(() => import('./components/BillingMenu').then(module => ({ default: module.BillingMenu })));
+const SuperAdminPanel = lazy(() => import('./components/SuperAdminPanel').then(module => ({ default: module.SuperAdminPanel })));
+const OwnerDashboard = lazy(() => import('./components/OwnerDashboard').then(module => ({ default: module.OwnerDashboard })));
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
@@ -38,6 +41,9 @@ export default function App() {
     // 1. Ambil cached user dari localStorage untuk respon cepat di awal
     const cachedUser = getCurrentUser();
     setUser(cachedUser);
+    if (cachedUser?.role === 'Developer') {
+      setCurrentTab('superadmin');
+    }
 
     // 2. Dengarkan status otentikasi Firebase secara asinkron sebelum menjalankan seeding database
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -77,6 +83,8 @@ export default function App() {
            logoutUser();
            setUser(null);
         }
+      }, (error) => {
+        console.warn("Sessions snapshot listener failed:", error);
       });
       return () => unsubscribe();
     } else {
@@ -96,10 +104,27 @@ export default function App() {
     return <SplashScreen onComplete={() => setShowSplash(false)} />;
   }
 
+  if (!init) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-500 font-sans">
+        <div className="w-8 h-8 border-4 border-slate-200 border-t-blue-500 rounded-full animate-spin mb-4"></div>
+        <p className="font-semibold text-sm">Menghubungkan ke Database...</p>
+      </div>
+    );
+  }
+
   if (!user) {
     return (
       <Suspense fallback={<LoadingFallback />}>
-        <Login onLogin={() => setUser(getCurrentUser())} />
+        <Login onLogin={() => {
+          const loggedUser = getCurrentUser();
+          setUser(loggedUser);
+          if (loggedUser?.role === 'Developer') {
+            setCurrentTab('superadmin');
+          } else {
+            setCurrentTab('dashboard');
+          }
+        }} />
       </Suspense>
     );
   }
@@ -115,31 +140,50 @@ export default function App() {
   const renderContent = () => {
     if (!init) return <div className="p-8 text-center text-slate-500">Initializing Database...</div>;
     
+    const role = user?.role || '';
+    const isOwnerOrDev = ['OWNER', 'Developer', 'Super Admin'].includes(role);
+    const isAdmin = ['ADMIN', 'Super Admin', 'Admin A5'].includes(role);
+    const isManager = ['MANAGER', 'Kepala Gudang', 'Kepala Gudang JKT'].includes(role);
+    const isPetugas = ['Petugas'].includes(role);
+
+    // Helper functions for auth routes
+    const canAccessOps = isAdmin;
+    const canAccessManageTransactions = isAdmin || isManager || isPetugas;
+    const canAccessReports = isAdmin || isManager;
+    const canAccessSettings = isOwnerOrDev;
+
     switch (currentTab) {
       case 'dashboard': 
+        if (['OWNER', 'Developer'].includes(role)) {
+           return <OwnerDashboard />;
+        }
         return <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'inventory': 
-        return <Inventory globalSearch={searchQuery} />; // 3. Kirim kata kunci lewat prop 'globalSearch'
+        return canAccessOps ? <Inventory globalSearch={searchQuery} /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'controlstock':
-        return <ControlStock searchQuery={searchQuery} />;
+        return (canAccessOps || canAccessReports) ? <ControlStock searchQuery={searchQuery} /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'inbound': 
-        return <Inbound globalSearch={searchQuery} />;
+        return canAccessManageTransactions ? <Inbound globalSearch={searchQuery} /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'outbound': 
-        return <Outbound globalSearch={searchQuery} />;
+        return canAccessManageTransactions ? <Outbound globalSearch={searchQuery} /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'ledger': 
-        return <StockLedger globalSearch={searchQuery} />;
+        return canAccessReports ? <StockLedger globalSearch={searchQuery} /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'balance': 
-        return <StockBalance globalSearch={searchQuery} />;
+        return canAccessReports ? <StockBalance globalSearch={searchQuery} /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'moving':
-        return <MovingRack />;
-      case 'staff':
-        return user?.role === 'Developer' ? <StaffManagement /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
-      case 'rack':
-        return user?.role === 'Developer' ? <RackManagement /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
+        return canAccessOps ? <MovingRack /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'scanner':
-        return <RackScanner />;
+        return (isAdmin || isPetugas) ? <RackScanner /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
+      case 'staff':
+        return canAccessSettings ? <StaffManagement /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
+      case 'rack':
+        return role === 'Super Admin' ? <RackManagement /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
+      case 'billing':
+        return canAccessSettings ? <BillingMenu /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
+      case 'superadmin':
+        return (role === 'Developer') ? <SuperAdminPanel /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'developer':
-        return user?.role === 'Developer' ? <DeveloperTools /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
+        return (role === 'Developer') ? <DeveloperTools /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       default: 
         return <Dashboard globalSearch={searchQuery} />;
     }

@@ -17,10 +17,11 @@ import {
   ArrowRightLeft,
   ScanBarcode,
   Database,
-  ClipboardList
+  ClipboardList,
+  CreditCard
 } from 'lucide-react';
 import { getCurrentUser, logoutUser } from '../lib/auth';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot, where } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Transaction } from '../types';
 
@@ -48,16 +49,24 @@ export function Layout({
   const user = getCurrentUser();
   
   useEffect(() => {
-    const q = query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(15));
+    const companyId = user?.companyId;
+    const isDeveloper = user?.role === 'Developer';
+    
+    const q = (!isDeveloper && companyId)
+      ? query(collection(db, 'transactions'), where('companyId', '==', companyId), orderBy('timestamp', 'desc'), limit(15))
+      : query(collection(db, 'transactions'), orderBy('timestamp', 'desc'), limit(15));
+
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const txs: Transaction[] = [];
       snapshot.forEach((doc) => {
         txs.push(doc.data() as Transaction);
       });
       setRecentTransactions(txs);
+    }, (error) => {
+      console.warn("Snapshot listener failed on transactions:", error);
     });
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   // Membagi transaksi realtime berdasarkan hari
   const groupedTransactions = useMemo(() => {
@@ -117,26 +126,56 @@ export function Layout({
     if (onLogout) onLogout();
   };
 
-  const tabs = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-    { id: 'inventory', label: 'Master Data', icon: Box },
-    { id: 'controlstock', label: 'Control Stock', icon: ClipboardList },
-    { id: 'inbound', label: 'Inbound', icon: LogIn },
-    { id: 'outbound', label: 'Outbound', icon: LogOut },
-    { id: 'ledger', label: 'Stock Ledger', icon: History },
-    { id: 'balance', label: 'Stock Balance', icon: Scale },
-    { id: 'scanner', label: 'Rack Scanner', icon: ScanBarcode },
-  ];
+  let tabs: any[] = [];
+  const role = user?.role || '';
 
-  if (user && ['Developer', 'Super Admin', 'Admin A5', 'Kepala Gudang JKT'].includes(user.role)) {
-    tabs.splice(4, 0, { id: 'moving', label: 'Moving Rack', icon: ArrowRightLeft });
-  }
-  
-  if (user?.role === 'Developer') {
+  // 1. Dashboard is generally available to all recognized roles
+  tabs.push({ id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard });
+
+  // 2. Roles: OWNER dan Developer -> Billing, User management, Settings
+  if (['OWNER', 'Developer', 'Super Admin'].includes(role)) {
     tabs.push({ id: 'staff', label: 'Staff Management', icon: UserPlus });
-    tabs.push({ id: 'rack', label: 'Manajemen Rak', icon: Layers });
+    if (role === 'Super Admin') {
+      tabs.push({ id: 'rack', label: 'Manajemen Rak', icon: Layers });
+    }
+    tabs.push({ id: 'billing', label: 'Billing & Plan', icon: CreditCard });
+  }
+
+  if (role === 'Developer') {
+    tabs.push({ id: 'superadmin', label: 'Super Admin', icon: Database });
     tabs.push({ id: 'developer', label: 'Developer Tools', icon: Database });
   }
+
+  // 3. Roles: ADMIN -> Semua operasional warehouse
+  if (['ADMIN', 'Super Admin', 'Admin A5'].includes(role)) {
+    tabs.push({ id: 'inventory', label: 'Master Data', icon: Box });
+    tabs.push({ id: 'controlstock', label: 'Control Stock', icon: ClipboardList });
+    tabs.push({ id: 'inbound', label: 'Inbound', icon: LogIn });
+    tabs.push({ id: 'moving', label: 'Moving Rack', icon: ArrowRightLeft });
+    tabs.push({ id: 'outbound', label: 'Outbound', icon: LogOut });
+    tabs.push({ id: 'ledger', label: 'Stock Ledger', icon: History });
+    tabs.push({ id: 'balance', label: 'Stock Balance', icon: Scale });
+    tabs.push({ id: 'scanner', label: 'Rack Scanner', icon: ScanBarcode });
+  }
+
+  // 4. Roles: MANAGER dan Kepala Gudang -> Approve transaksi, Report
+  if (['MANAGER', 'Kepala Gudang', 'Kepala Gudang JKT'].includes(role)) {
+    tabs.push({ id: 'inbound', label: 'Inbound', icon: LogIn });
+    tabs.push({ id: 'outbound', label: 'Outbound', icon: LogOut });
+    tabs.push({ id: 'controlstock', label: 'Control Stock', icon: ClipboardList });
+    tabs.push({ id: 'ledger', label: 'Stock Ledger', icon: History });
+    tabs.push({ id: 'balance', label: 'Stock Balance', icon: Scale });
+  }
+
+  // 5. Roles: Petugas -> Inbound, Outbound, Scanner
+  if (['Petugas'].includes(role)) {
+    tabs.push({ id: 'inbound', label: 'Inbound', icon: LogIn });
+    tabs.push({ id: 'outbound', label: 'Outbound', icon: LogOut });
+    tabs.push({ id: 'scanner', label: 'Rack Scanner', icon: ScanBarcode });
+  }
+
+  // Deduplicate tabs just in case a role matches multiple overlapping conditions
+  tabs = tabs.filter((t, index, self) => index === self.findIndex(i => i.id === t.id));
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
@@ -232,7 +271,7 @@ export function Layout({
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <input 
                 type="search" 
-                placeholder="Search SKU, Batch, or Bin..." 
+                placeholder="Search Kode, Batch, or Bin..." 
                 aria-label="Search items"
                 value={activeSearchValue} // Value dikontrol oleh state
                 onChange={(e) => handleSearchChange(e.target.value)} // Memicu perubahan input

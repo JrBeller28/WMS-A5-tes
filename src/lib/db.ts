@@ -3,8 +3,47 @@ import { collection, doc, getDocs, getDoc, setDoc, updateDoc, deleteDoc, runTran
 import { Locator, Product, Transaction, ZoneCategory } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
+export const getProductDocId = (sku: string): string => {
+  return encodeURIComponent(sku);
+};
+
+export const getCurrentCompanyId = () => {
+    const userStr = localStorage.getItem('currentUser');
+    if (userStr) {
+        try {
+            const user = JSON.parse(userStr);
+            if (user && user.companyId) return user.companyId;
+        } catch(e) {}
+    }
+    return '';
+}
+
+export const getCurrentWarehouseId = () => {
+    const userStr = localStorage.getItem('currentUser');
+    if (userStr) {
+        try {
+            const user = JSON.parse(userStr);
+            if (user && user.warehouseId) return user.warehouseId;
+        } catch(e) {}
+    }
+    return 'MAIN_WH';
+}
+
+export const isGlobalDeveloper = () => {
+    const userStr = localStorage.getItem('currentUser');
+    if (userStr) {
+        try {
+            const user = JSON.parse(userStr);
+            return user.role === 'Developer';
+        } catch(e) {}
+    }
+    return false;
+}
+
 export const getProducts = async (): Promise<Product[]> => {
-  const snapshot = await getDocs(collection(db, 'products'));
+  const companyId = getCurrentCompanyId();
+  const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'products'), where('companyId', '==', companyId)) : collection(db, 'products');
+  const snapshot = await getDocs(q as any);
   const products: Product[] = [];
   snapshot.forEach(doc => {
     products.push(doc.data() as Product);
@@ -13,7 +52,9 @@ export const getProducts = async (): Promise<Product[]> => {
 };
 
 export const getLocators = async (): Promise<Locator[]> => {
-  const snapshot = await getDocs(collection(db, 'locators'));
+  const companyId = getCurrentCompanyId();
+  const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'locators'), where('companyId', '==', companyId)) : collection(db, 'locators');
+  const snapshot = await getDocs(q as any);
   const locators: Locator[] = [];
   snapshot.forEach(doc => {
     locators.push(doc.data() as Locator);
@@ -22,6 +63,7 @@ export const getLocators = async (): Promise<Locator[]> => {
 };
 
 export const addLocator = async (locator: Locator) => {
+  locator.companyId = locator.companyId || getCurrentCompanyId();
   await setDoc(doc(db, 'locators', locator.id), locator);
 };
 
@@ -34,12 +76,14 @@ export const deleteLocator = async (id: string) => {
 };
 
 export const addProduct = async (product: Product) => {
-  await setDoc(doc(db, 'products', product.sku), product);
+  product.companyId = product.companyId || getCurrentCompanyId();
+  await setDoc(doc(db, 'products', getProductDocId(product.sku)), product);
 };
 
 export const addProductWithStock = async (product: Product, qty: number, locatorId: string, operator: string) => {
+  product.companyId = product.companyId || getCurrentCompanyId();
   const batch = writeBatch(db);
-  const productRef = doc(db, 'products', product.sku);
+  const productRef = doc(db, 'products', getProductDocId(product.sku));
   batch.set(productRef, product);
 
   if (qty > 0 && locatorId) {
@@ -47,6 +91,7 @@ export const addProductWithStock = async (product: Product, qty: number, locator
     const txRef = doc(db, 'transactions', txId);
     batch.set(txRef, {
       id: txId,
+      companyId: product.companyId,
       type: 'INBOUND',
       sku: product.sku,
       qty: qty,
@@ -61,17 +106,17 @@ export const addProductWithStock = async (product: Product, qty: number, locator
 };
 
 export const updateProduct = async (sku: string, data: Partial<Product>) => {
-  await updateDoc(doc(db, 'products', sku), data as any);
+  await updateDoc(doc(db, 'products', getProductDocId(sku)), data as any);
 };
 
 export const deleteProduct = async (sku: string) => {
-  await deleteDoc(doc(db, 'products', sku));
+  await deleteDoc(doc(db, 'products', getProductDocId(sku)));
 };
 
 export const addProductsBatch = async (products: Product[]) => {
   const batch = writeBatch(db);
   for (const p of products) {
-    const ref = doc(db, 'products', p.sku);
+    const ref = doc(db, 'products', getProductDocId(p.sku));
     batch.set(ref, p, { merge: true });
   }
   await batch.commit();
@@ -81,9 +126,11 @@ export const addProductsBatchWithStock = async (
   items: { product: Product; qty?: number; locatorId?: string }[],
   operator: string
 ) => {
+  const companyId = getCurrentCompanyId();
   const batch = writeBatch(db);
   for (const item of items) {
-    const productRef = doc(db, 'products', item.product.sku);
+    item.product.companyId = item.product.companyId || companyId;
+    const productRef = doc(db, 'products', getProductDocId(item.product.sku));
     batch.set(productRef, item.product, { merge: true });
 
     if (item.qty && item.qty > 0 && item.locatorId) {
@@ -91,6 +138,7 @@ export const addProductsBatchWithStock = async (
       const txRef = doc(db, 'transactions', txId);
       batch.set(txRef, {
         id: txId,
+        companyId: item.product.companyId,
         type: 'INBOUND',
         sku: item.product.sku,
         qty: item.qty,
@@ -106,7 +154,9 @@ export const addProductsBatchWithStock = async (
 };
 
 export const getTransactions = async (): Promise<Transaction[]> => {
-  const snapshot = await getDocs(collection(db, 'transactions'));
+  const companyId = getCurrentCompanyId();
+  const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'transactions'), where('companyId', '==', companyId)) : collection(db, 'transactions');
+  const snapshot = await getDocs(q as any);
   const transactions: Transaction[] = [];
   snapshot.forEach(doc => {
     transactions.push(doc.data() as Transaction);
@@ -116,6 +166,7 @@ export const getTransactions = async (): Promise<Transaction[]> => {
 };
 
 export const addTransaction = async (tx: Transaction) => {
+  tx.companyId = tx.companyId || getCurrentCompanyId();
   await setDoc(doc(db, 'transactions', tx.id), tx);
 };
 
@@ -319,12 +370,14 @@ export const getRackDetailsByBarcode = async (barcode: string) => {
 };
 
 export const transferInventory = async (sku: string, fromLocatorId: string, toLocatorId: string, qty: number, operator: string) => {
+  const companyId = getCurrentCompanyId();
   const batch = writeBatch(db);
   const outTxId = uuidv4();
   const inTxId = uuidv4();
 
   batch.set(doc(db, 'transactions', outTxId), {
     id: outTxId,
+    companyId,
     type: 'OUTBOUND',
     sku,
     qty: -qty,
@@ -337,6 +390,7 @@ export const transferInventory = async (sku: string, fromLocatorId: string, toLo
 
   batch.set(doc(db, 'transactions', inTxId), {
     id: inTxId,
+    companyId,
     type: 'INBOUND',
     sku,
     qty: qty,
@@ -417,17 +471,22 @@ export const getPutawayRecommendations = async (sku: string, qty: number) => {
 
 export const seedDatabase = async () => {
     try {
-        const lDocs = await getDocs(collection(db, 'locators'));
-        if (lDocs.size > 0 && lDocs.size < 400) {
-            for (const doc of lDocs.docs) {
-               await deleteDoc(doc.ref);
-            }
-        } else if (lDocs.size >= 400) {
+        const companyId = getCurrentCompanyId();
+        if (!companyId) {
+            console.log("No active companyId, skipping seedDatabase.");
+            return;
+        }
+
+        const q = query(collection(db, 'locators'), where('companyId', '==', companyId));
+        const lDocs = await getDocs(q);
+        if (lDocs.size > 0) {
+            console.log("Database already seeded, skipping seedDatabase.");
             return;
         }
 
         const locators: Locator[] = [];
         const maxVolumeM3 = 5.4; 
+        const warehouseId = getCurrentWarehouseId() || 'MAIN_WH';
       
         const racksConfig = [
           { rack: 'FL-A', prefix: ['FL-A'], cols: 5, zone: 'DEFAULT' as ZoneCategory, levels: 2 },
@@ -460,7 +519,9 @@ export const seedDatabase = async () => {
                   column: colName,
                   level: l,
                   zone: rc.zone,
-                  maxVolumeM3
+                  maxVolumeM3,
+                  companyId,
+                  warehouseId
                 });
               }
             }
@@ -468,11 +529,11 @@ export const seedDatabase = async () => {
         }
       
         const products: Product[] = [
-          { sku: 'PB-PIPE-PVC', name: 'Plumbing PVC Pipe 4"', category: 'FG_PLUMBING', volumeM3: 0.5, uom: 'PCS' },
-          { sku: 'SW-SENS-01', name: 'Smart Flow Sensor', category: 'FG_SMART_WATER', volumeM3: 0.1, uom: 'PCS' },
-          { sku: 'FT-ELBOW-90', name: 'Brass Elbow 90', category: 'FG_FITTING', volumeM3: 0.2, uom: 'PCS' },
-          { sku: 'FL-CARBON', name: 'Carbon Filter Unit', category: 'FG_FILTER', volumeM3: 0.8, uom: 'SET' },
-          { sku: 'AK-MAN-01', name: 'Manufacture Kit 01', category: 'ASSEMBLY_KIT', volumeM3: 1.5, uom: 'BOX' },
+          { sku: 'PB-PIPE-PVC', name: 'Plumbing PVC Pipe 4"', category: 'FG_PLUMBING', volumeM3: 0.5, uom: 'PCS', companyId, warehouseId },
+          { sku: 'SW-SENS-01', name: 'Smart Flow Sensor', category: 'FG_SMART_WATER', volumeM3: 0.1, uom: 'PCS', companyId, warehouseId },
+          { sku: 'FT-ELBOW-90', name: 'Brass Elbow 90', category: 'FG_FITTING', volumeM3: 0.2, uom: 'PCS', companyId, warehouseId },
+          { sku: 'FL-CARBON', name: 'Carbon Filter Unit', category: 'FG_FILTER', volumeM3: 0.8, uom: 'SET', companyId, warehouseId },
+          { sku: 'AK-MAN-01', name: 'Manufacture Kit 01', category: 'ASSEMBLY_KIT', volumeM3: 1.5, uom: 'BOX', companyId, warehouseId },
         ];
       
         const dummyTransactions: Transaction[] = [
@@ -504,13 +565,18 @@ export const seedDatabase = async () => {
           { id: uuidv4(), type: 'INBOUND', sku: 'AK-MAN-01', qty: 3, locatorId: 'I1.1', operator: 'System', timestamp: new Date().toISOString(), status: 'CONFIRMED' },
         ];
         
+        for (const tx of dummyTransactions) {
+          tx.companyId = companyId;
+          tx.warehouseId = warehouseId;
+        }
+
         const batch = writeBatch(db);
         
         for (const loc of locators) {
           batch.set(doc(db, 'locators', loc.id), loc);
         }
         for (const p of products) {
-            batch.set(doc(db, 'products', p.sku), p);
+            batch.set(doc(db, 'products', getProductDocId(p.sku)), p);
         }
         for (const tx of dummyTransactions) {
             batch.set(doc(db, 'transactions', tx.id), tx);
@@ -526,7 +592,9 @@ export const seedDatabase = async () => {
 export const savePhysicalStockCount = async (locatorId: string, sku: string, qty: number) => {
   try {
     const docId = `${locatorId}_${sku}`;
+    const companyId = getCurrentCompanyId();
     await setDoc(doc(db, 'physical_stock_counts', docId), {
+      companyId,
       locatorId,
       sku,
       qty,
@@ -539,10 +607,13 @@ export const savePhysicalStockCount = async (locatorId: string, sku: string, qty
 
 export const getPhysicalStockCounts = async () => {
   try {
-    const snapshot = await getDocs(collection(db, 'physical_stock_counts'));
+    const companyId = getCurrentCompanyId();
+    const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'physical_stock_counts'), where('companyId', '==', companyId)) : collection(db, 'physical_stock_counts');
+    const snapshot = await getDocs(q as any);
     const counts: Record<string, number> = {};
     snapshot.forEach(doc => {
-      counts[doc.id] = doc.data().qty;
+      const data = doc.data() as any;
+      counts[doc.id] = data.qty;
     });
     return counts;
   } catch (err) {
@@ -552,9 +623,12 @@ export const getPhysicalStockCounts = async () => {
 };
 
 export const resetStockAndTransactions = async () => {
+  const companyId = getCurrentCompanyId();
+  if (!companyId) return;
   const collectionsToDelete = ['products', 'transactions'];
   for (const collName of collectionsToDelete) {
-    const snapshot = await getDocs(collection(db, collName));
+    const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, collName), where('companyId', '==', companyId)) : collection(db, collName);
+    const snapshot = await getDocs(q as any);
     let batch = writeBatch(db);
     let count = 0;
     

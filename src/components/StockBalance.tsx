@@ -345,7 +345,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
         );
 
         if (skuIdx === -1 || stockIdx === -1) {
-          throw new Error('Kolom "SKU" dan pencocok jumlah stok tidak ditemukan di file CSV. Pastikan ada nama kolom "Kode SKU" dan juga kolom penentu jumlah fisik.');
+          throw new Error('Kolom "Kode" dan pencocok jumlah stok tidak ditemukan di file CSV. Pastikan ada nama kolom "Kode" dan juga kolom penentu jumlah fisik.');
         }
 
         const newMapping: Record<string, string> = {};
@@ -424,7 +424,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
   };
 
   const handleExportExcel = () => {
-    const headers = ['Kode SKU', 'Nama Barang', 'Kategori', 'Posisi Rak', 'Stock Sistem App', 'Stock Rill (GSheet/CSV)', 'Selisih', 'UOM'];
+    const headers = ['Kode', 'Nama Barang', 'Kategori', 'Posisi Rak', 'Stock Sistem App', 'Stock Rill (GSheet/CSV)', 'Selisih', 'UOM'];
     
     const rows = stockItems.map(item => {
       const realStockValue = parseFloat(realStockInputs[item.id]) || 0;
@@ -513,9 +513,9 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
                  setHistoryCurrentPage(1);
                }}
              >
-               <option value={30}>30 SKU/halaman</option>
-               <option value={50}>50 SKU/halaman</option>
-               <option value={100}>100 SKU/halaman</option>
+               <option value={30}>30 Kode/halaman</option>
+               <option value={50}>50 Kode/halaman</option>
+               <option value={100}>100 Kode/halaman</option>
              </select>
             <button 
               onClick={handleExportExcel}
@@ -623,7 +623,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
           <table className="w-full text-left border-collapse min-w-[1000px]">
             <thead className="bg-slate-50 border-b border-slate-200">
               <tr>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-48">SKU / RAK</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-48">KODE / RAK</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">DESKRIPSI NAMA</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KATEGORI</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">STOCK SISTEM</th>
@@ -767,7 +767,7 @@ export function StockBalance({ globalSearch = '' }: { globalSearch?: string }) {
               <tfoot className="bg-slate-100 border-t-2 border-slate-300 font-bold text-slate-800 sticky bottom-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
                 <tr>
                   <td colSpan={3} className="px-6 py-4 text-xs font-extrabold text-slate-600 uppercase tracking-wider text-right">
-                    Grand Total Summary ({groupedItems.length} SKU / {filteredItems.length} Rak) :
+                    Grand Total Summary ({groupedItems.length} Kode / {filteredItems.length} Rak) :
                   </td>
                   <td className="px-6 py-4 text-sm font-extrabold font-mono text-right text-slate-700 whitespace-nowrap">
                     {totalSystemStock.toLocaleString('id-ID')}

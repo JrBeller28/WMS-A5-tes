@@ -29,7 +29,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   const isSuperAdmin = userRoleClean === 'SUPER_ADMIN' || currentUser?.role?.toLowerCase() === 'super admin';
   const isKepalaGudangJkt = userRoleClean === 'KEPALA_GUDANG_JKT' || userRoleClean === 'KEPALA GUDANG JKT';
   
-  const canImportCSV = ['admin a5', 'super admin', 'developer'].includes(currentUser?.role?.trim().toLowerCase() || '');
+  const canImportCSV = !!currentUser;
 
   // Menggabungkan izin untuk melihat & mengeksekusi menu AKSI
   const hasActionAccess = isSuperAdmin || isKepalaGudangJkt;
@@ -109,7 +109,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
     try {
       if (editingProduct) {
         if (!hasActionAccess) {
-          setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin atau Kepala Gudang JKT yang boleh mengubah data SKU.' });
+          setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin atau Kepala Gudang JKT yang boleh mengubah data produk.' });
           return;
         }
 
@@ -243,11 +243,11 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
 
   const handleDelete = async (sku: string) => {
     if (!hasActionAccess) {
-      setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin atau Kepala Gudang JKT yang berhak menghapus data SKU.' });
+      setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin atau Kepala Gudang JKT yang berhak menghapus data produk.' });
       return;
     }
 
-    if (!confirm(`Are you sure you want to delete SKU: ${sku}?`)) return;
+    if (!confirm(`Are you sure you want to delete product code: ${sku}?`)) return;
     try {
       const txs = await getTransactions();
       const hasTransactions = txs.some(tx => tx.sku === sku);
@@ -305,10 +305,10 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   };
 
   const downloadTemplate = () => {
-    const csvContent = "data:text/csv;charset=utf-8,sku,name,category,volumeM3,uom,packingSize,packUom\n" +
-                       "P-PLUMB-001,Pipa PVC 2 Inch,FG_PLUMBING,0.015,PCS,10,PACK\n" +
-                       "S-SMART-002,Water Flow Meter Digital,FG_SMART_WATER,0.008,BOX,5,CARTON\n" +
-                       "F-FIT-003,Sock Drat Dalam 1/2,FG_FITTING,0.002,PCS,20,PACK";
+    const csvContent = "data:text/csv;charset=utf-8,sku,name,category,volumeM3,uom\n" +
+                       "P-PLUMB-001,Pipa PVC 2 Inch,FG_PLUMBING,0.015,PCS\n" +
+                       "S-SMART-002,Water Flow Meter Digital,FG_SMART_WATER,0.008,BOX\n" +
+                       "F-FIT-003,Sock Drat Dalam 1/2,FG_FITTING,0.002,PCS";
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -320,7 +320,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!canImportCSV) {
-      setMessage({ type: 'error', text: 'Akses ditolak. Hanya Admin A5, Super Admin, dan Developer yang berhak mengimpor file CSV.' });
+      setMessage({ type: 'error', text: 'Akses ditolak. Anda tidak memiliki izin untuk mengimpor file CSV.' });
       e.target.value = '';
       return;
     }
@@ -331,56 +331,169 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
     const reader = new FileReader();
     reader.onload = async (evt) => {
       const text = evt.target?.result as string;
-      const lines = text.split('\n');
+      const lines = text.split(/\r?\n/);
+      if (lines.length < 2) {
+        setMessage({ type: 'error', text: 'File CSV kosong atau tidak valid.' });
+        return;
+      }
+
+      // Detect delimiter globally from the header line
+      const headerLine = lines[0] || '';
+      const commaCount = (headerLine.match(/,/g) || []).length;
+      const semicolonCount = (headerLine.match(/;/g) || []).length;
+      const tabCount = (headerLine.match(/\t/g) || []).length;
+
+      let delimiter = ',';
+      if (semicolonCount > commaCount && semicolonCount > tabCount) {
+        delimiter = ';';
+      } else if (tabCount > commaCount && tabCount > semicolonCount) {
+        delimiter = '\t';
+      }
+
+      // Helper function to parse CSV line keeping quoted fields intact
+      const parseCSVLine = (lineStr: string, delim: string): string[] => {
+        const result: string[] = [];
+        let current = '';
+        let inQuotes = false;
+        
+        for (let idx = 0; idx < lineStr.length; idx++) {
+          const char = lineStr[idx];
+          if (char === '"') {
+            if (inQuotes && lineStr[idx + 1] === '"') {
+              current += '"';
+              idx++; // skip next quote
+            } else {
+              inQuotes = !inQuotes;
+            }
+          } else if (char === delim && !inQuotes) {
+            result.push(current);
+            current = '';
+          } else {
+            current += char;
+          }
+        }
+        result.push(current);
+        return result;
+      };
+
+      // Helper to strip outer quotes and unescape inner quotes
+      const cleanValue = (val: string): string => {
+        let cleaned = val.trim();
+        if (cleaned.startsWith('"') && cleaned.endsWith('"')) {
+          cleaned = cleaned.slice(1, -1);
+        } else if (cleaned.startsWith("'") && cleaned.endsWith("'")) {
+          cleaned = cleaned.slice(1, -1);
+        }
+        cleaned = cleaned.replace(/""/g, '"');
+        return cleaned.trim();
+      };
+
       const itemsToImport: { product: Product; qty?: number; locatorId?: string }[] = [];
       const skippedRows: string[] = [];
 
       for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
-        const [sku, name, category, volumeM3, uom, packingSizeVal, packUomVal] = line.split(',');
-        if (sku && name && category && volumeM3) {
+        
+        const parts = parseCSVLine(line, delimiter).map(cleanValue);
+        const [sku, name, category, volumeM3, uom] = parts;
+
+        if (sku && name && category && volumeM3 !== undefined && volumeM3 !== '') {
           const skuClean = sku.trim().toUpperCase();
-          const pCategory = category.trim() as ZoneCategory;
-          const packingSize = packingSizeVal ? parseInt(packingSizeVal.trim(), 10) : undefined;
-          const packUom = packUomVal ? packUomVal.trim().toUpperCase() : undefined;
+          
+          // Normalize and adapt category automatically
+          const rawCat = category.trim().toUpperCase().replace(/[\s-]+/g, '_');
+          let pCategory: ZoneCategory = 'DEFAULT';
+          
+          const validCategories: ZoneCategory[] = [
+            'FG_PLUMBING',
+            'FG_SMART_WATER',
+            'FG_FITTING',
+            'FG_FILTER',
+            'PACKAGING_MATERIALS',
+            'ASSEMBLY_KIT',
+            'SPECIFIC_AREA',
+            'RAW_MATERIALS',
+            'DEFAULT'
+          ];
+
+          if (validCategories.includes(rawCat as ZoneCategory)) {
+            pCategory = rawCat as ZoneCategory;
+          } else {
+            // Apply smart auto-mapping to adapt category
+            if (rawCat.includes('PLUMB')) {
+              pCategory = 'FG_PLUMBING';
+            } else if (rawCat.includes('SMART') || rawCat.includes('WATER')) {
+              pCategory = 'FG_SMART_WATER';
+            } else if (rawCat.includes('FITT')) {
+              pCategory = 'FG_FITTING';
+            } else if (rawCat.includes('FILT')) {
+              pCategory = 'FG_FILTER';
+            } else if (rawCat.includes('PACK')) {
+              pCategory = 'PACKAGING_MATERIALS';
+            } else if (rawCat.includes('ASSEMBL')) {
+              pCategory = 'ASSEMBLY_KIT';
+            } else if (rawCat.includes('RAW') || rawCat.includes('BAHAN')) {
+              pCategory = 'RAW_MATERIALS';
+            } else if (rawCat.includes('SPECIFIC') || rawCat.includes('AREA')) {
+              pCategory = 'SPECIFIC_AREA';
+            } else {
+              pCategory = 'DEFAULT'; // Safe fallback
+            }
+          }
+
+          // Validate Volume
+          const parsedVolume = parseFloat(volumeM3.replace(',', '.').trim());
+          if (isNaN(parsedVolume)) {
+            skippedRows.push(`Baris ${i + 1}: Volume '${volumeM3}' bukan angka desimal yang valid.`);
+            continue;
+          }
 
           itemsToImport.push({
             product: {
               sku: skuClean,
               name: name.trim(),
               category: pCategory,
-              volumeM3: parseFloat(volumeM3.trim()),
-              uom: uom ? uom.trim().toUpperCase() : 'PCS',
-              packingSize: packingSize && !isNaN(packingSize) ? packingSize : undefined,
-              packUom: packUom || undefined
+              volumeM3: parsedVolume,
+              uom: uom ? uom.trim().toUpperCase() : 'PCS'
             }
           });
+        } else {
+          skippedRows.push(`Baris ${i + 1}: Format kolom tidak lengkap (wajib ada Kode, Nama, Kategori, Volume).`);
         }
       }
 
       if (itemsToImport.length > 0) {
         try {
           const existSkus = new Set(products.map(p => p.sku));
-          const newItems = itemsToImport.filter(item => item.product.sku && !existSkus.has(item.product.sku));
+          const newItems = itemsToImport.filter(item => !existSkus.has(item.product.sku));
+          const updatedItems = itemsToImport.filter(item => existSkus.has(item.product.sku));
           
+          const operatorName = currentUser?.name || 'SYSTEM';
+          await addProductsBatchWithStock(itemsToImport, operatorName);
+          
+          let alertText = `Berhasil memproses impor data: Total ${itemsToImport.length} produk berhasil diunggah.`;
           if (newItems.length > 0) {
-              const operatorName = currentUser?.name || 'SYSTEM';
-              await addProductsBatchWithStock(newItems, operatorName);
+            alertText += `\n- ${newItems.length} produk baru ditambahkan ke database.`;
           }
-          
-          let alertText = `Berhasil mengimpor data: ${newItems.length} SKU baru ditambahkan ke database. ${itemsToImport.length - newItems.length} SKU dilewati karena duplikat.`;
+          if (updatedItems.length > 0) {
+            alertText += `\n- ${updatedItems.length} produk yang sudah ada diperbarui datanya.`;
+          }
           if (skippedRows.length > 0) {
             alertText += `\n\nDetail Baris yang Dilompati / Gagal:\n` + skippedRows.join('\n');
           }
           
           setMessage({ 
-            type: skippedRows.length > 0 ? 'error' : 'success', 
+            type: 'success', 
             text: alertText 
           });
           fetchProducts();
-        } catch (err) {
-          setMessage({ type: 'error', text: 'Gagal mengimpor produk ke database.' });
+        } catch (err: any) {
+          console.error("Firestore batch upload failed:", err);
+          setMessage({ 
+            type: 'error', 
+            text: `Gagal mengimpor produk ke database. Detail error: ${err?.message || err}` 
+          });
         }
       } else {
         let alertText = 'Tidak ada produk baru atau baris valid yang berhasil diproses.';
@@ -415,10 +528,10 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
           <div>
             <h2 className="text-[17px] font-bold text-slate-800 flex items-center gap-2 tracking-wide uppercase">
               <span className="w-5 h-5 rounded-full border-2 border-blue-600 text-blue-600 flex items-center justify-center text-lg">+</span>
-              Katalog SKU & Kontrol Safety Stock Pabrik
+              Katalog Kode Produk & Kontrol Safety Stock Pabrik
             </h2>
             <p className="text-slate-500 mt-1.5 text-[13px]">
-              Daftar SKU Aktif, dimensi unit, dan pengaturan manajemen stok gudang. Klik untuk membuka/menutup panel registrasi baru.
+              Daftar Kode Produk Aktif, dimensi unit, dan pengaturan manajemen stok gudang. Klik untuk membuka/menutup panel registrasi baru.
             </p>
           </div>
           <ChevronDown className={`w-5 h-5 text-slate-400 transition-transform ${showForm ? 'rotate-180' : ''}`} />
@@ -486,7 +599,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
           
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">SKU</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">KODE PRODUK</label>
               <input 
                 type="text" 
                 value={formData.sku || ''} 
@@ -784,7 +897,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
           <table className="w-full text-left min-w-[900px]">
           <thead className="bg-slate-50 border-b border-slate-200">
             <tr>
-              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KODE SKU</th>
+              <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KODE PRODUK</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">DESKRIPSI NAMA</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">KATEGORI LAYOUT SLOT</th>
               <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">PACKAGING / UOM</th>
@@ -878,7 +991,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
             <tfoot className="bg-slate-100 border-t-2 border-slate-300 text-slate-800 font-bold sticky bottom-0 z-10 shadow-[0_-2px_10px_rgba(0,0,0,0.05)]">
               <tr>
                 <td colSpan={4} className="px-6 py-4 text-xs font-extrabold text-slate-600 uppercase tracking-wider text-right">
-                  Grand Total ({filteredProducts.length} SKU Terfilter) :
+                  Grand Total ({filteredProducts.length} Produk Terfilter) :
                 </td>
                 {/* Akumulasi Total Dimensi Terpakai (Volume & Berat Kumulatif dari Stok On-Hand) */}
                 <td className="px-6 py-4">

@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { Database, AlertTriangle, Trash2, ShieldAlert, CheckCircle, RefreshCw } from 'lucide-react';
+import { Database, AlertTriangle, Trash2, ShieldAlert, CheckCircle, RefreshCw, Rocket } from 'lucide-react';
 import { resetStockAndTransactions } from '../lib/db';
+import { migrateToSaaS } from '../lib/migrateSaaS';
 
 export function DeveloperTools() {
   const [confirmPhrase, setConfirmPhrase] = useState('');
   const [loading, setLoading] = useState(false);
+  const [migrating, setMigrating] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -33,6 +35,26 @@ export function DeveloperTools() {
     }
   };
 
+  const handleMigrate = async () => {
+    setMigrating(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const res = await migrateToSaaS();
+      if (res.success) {
+        setSuccess(res.message);
+      } else {
+        setError(res.message);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError('Gagal Migrasi: ' + (err.message || 'Unknown error'));
+    } finally {
+      setMigrating(false);
+    }
+  };
+
   return (
     <div className="space-y-6 max-w-4xl">
       <div>
@@ -45,6 +67,28 @@ export function DeveloperTools() {
         </p>
       </div>
 
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
+        <div className="p-6 border-b border-slate-200 flex items-start gap-3.5 bg-blue-50">
+          <div className="p-2.5 bg-blue-100 text-blue-700 rounded-lg shrink-0">
+            <Rocket className="w-6 h-6" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-md font-extrabold text-blue-900 leading-snug">Migrate ke SaaS (Sistem Tenant)</h3>
+            <p className="text-xs text-blue-700 mt-1 mb-4 font-medium max-w-2xl">
+              Skrip ini akan membuat induk "COMPANY_A5_CORP" (sebagai tenant Gudang Anda), membuat paket "Enterprise" seumur hidup, lalu mengubah seluruh koleksi database lama menjadi milik company tersebut untuk support arsitektur Multi-Tenant.
+            </p>
+            <button
+               onClick={handleMigrate}
+               disabled={migrating}
+               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center gap-2 transition-colors"
+             >
+               {migrating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
+               Jalankan Migrasi SaaS
+             </button>
+          </div>
+        </div>
+      </div>
+
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {/* Header Warning */}
         <div className="p-6 bg-red-50 border-b border-red-100 flex items-start gap-3.5">
@@ -54,7 +98,7 @@ export function DeveloperTools() {
           <div>
             <h3 className="text-md font-extrabold text-red-900 leading-snug">Zona Bahaya: Reset Seluruh Data Gudang</h3>
             <p className="text-xs text-red-700 mt-1 font-medium max-w-2xl">
-              Tindakan ini permanen dan tidak dapat dibatalkan. Menjalankan operasi ini akan menghapus seluruh data SKU Produk (Stock Overview) serta seluruh catatan transaksi keluar-masuk (Inbound & Outbound) dari database Firestore.
+              Tindakan ini permanen dan tidak dapat dibatalkan. Menjalankan operasi ini akan menghapus seluruh data Kode Produk (Stock Overview) serta seluruh catatan transaksi keluar-masuk (Inbound & Outbound) dari database Firestore.
             </p>
           </div>
         </div>
@@ -66,7 +110,7 @@ export function DeveloperTools() {
                 <Trash2 className="w-3.5 h-3.5 text-red-500" /> DATA YANG AKAN DIHAPUS:
               </h4>
               <ul className="list-disc pl-4 space-y-1.5 font-medium">
-                <li><strong className="text-slate-800">Semua SKU Produk</strong> (nama, kategori, volume, uom, detail packaging)</li>
+                <li><strong className="text-slate-800">Semua Kode Produk</strong> (nama, kategori, volume, uom, detail packaging)</li>
                 <li><strong className="text-slate-800">Riwayat Inbound</strong> (catatan detail penerimaan produk baru)</li>
                 <li><strong className="text-slate-800">Riwayat Outbound</strong> (catatan pengeluaran barang & status booking)</li>
                 <li><strong className="text-slate-800">Perhitungan On-hand Stock</strong> di seluruh lokasi rak</li>

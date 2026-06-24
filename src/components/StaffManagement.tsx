@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Mail, Shield, Lock, UserPlus, FileCheck, Users, Search, RefreshCw, Key, CheckCircle2, Cloud } from 'lucide-react';
 import { registerUser, USERS, getCurrentUser } from '../lib/auth';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase';
 
 export const StaffManagement = () => {
@@ -11,6 +11,7 @@ export const StaffManagement = () => {
   const [regRole, setRegRole] = useState('Petugas');
   const [regPassword, setRegPassword] = useState('');
   const [regConfirmPassword, setRegConfirmPassword] = useState('');
+  const [regCompanyId, setRegCompanyId] = useState('');
   const [regError, setRegError] = useState('');
   const [regSuccess, setRegSuccess] = useState('');
   const [loading, setLoading] = useState(false);
@@ -19,23 +20,38 @@ export const StaffManagement = () => {
   const [staffList, setStaffList] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [fetchLoading, setFetchLoading] = useState(false);
+  const [companies, setCompanies] = useState<any[]>([]);
+  const [selectedCompanyId, setSelectedCompanyId] = useState<string>('ALL');
 
   const currentUser = getCurrentUser();
+
+  const fetchCompanies = async () => {
+    try {
+      const cmpSnap = await getDocs(query(collection(db, 'companies')));
+      const c: any[] = [];
+      cmpSnap.forEach(x => c.push({ id: x.id, ...x.data() }));
+      setCompanies(c);
+    } catch(e) {}
+  };
 
   const fetchStaff = async () => {
     setFetchLoading(true);
     try {
       // Fetch from Firestore users collection
-      const querySnapshot = await getDocs(collection(db, 'users'));
+      const q = (['Developer', 'OWNER'].includes(currentUser?.role || '')) 
+        ? collection(db, 'users')
+        : query(collection(db, 'users'), where('companyId', '==', currentUser?.companyId || ''));
+      const querySnapshot = await getDocs(q as any);
       const fbUsers: any[] = [];
       querySnapshot.forEach((doc) => {
-        const data = doc.data();
+        const data = doc.data() as any;
         fbUsers.push({
           uid: data.uid || doc.id,
           username: data.username,
           name: data.name,
           email: data.email,
           role: data.role,
+          companyId: data.companyId,
           isPredefined: false
         });
       });
@@ -43,6 +59,7 @@ export const StaffManagement = () => {
       // Merge with USERS predefined list to guarantee they're shown
       const mergedList = [...fbUsers];
       USERS.forEach((staticUser) => {
+        if (!['Developer', 'OWNER'].includes(currentUser?.role || '') && staticUser.companyId !== currentUser?.companyId) return;
         const exists = fbUsers.some(
           (u) => u.username?.toLowerCase() === staticUser.username.toLowerCase()
         );
@@ -53,6 +70,7 @@ export const StaffManagement = () => {
             name: staticUser.name,
             email: `${staticUser.username.toLowerCase()}@gudangpsn.com`,
             role: staticUser.role,
+            companyId: staticUser.companyId,
             isPredefined: true
           });
         }
@@ -62,10 +80,14 @@ export const StaffManagement = () => {
       mergedList.sort((a, b) => {
         const rolePriority: { [key: string]: number } = {
           'Developer': 0,
-          'Super Admin': 1,
-          'Admin A5': 2,
-          'Kepala Gudang JKT': 3,
-          'Petugas': 4,
+          'OWNER': 1,
+          'Super Admin': 2,
+          'ADMIN': 3,
+          'Admin A5': 4,
+          'MANAGER': 5,
+          'Kepala Gudang': 6,
+          'Kepala Gudang JKT': 7,
+          'Petugas': 8,
         };
         const pA = rolePriority[a.role] !== undefined ? rolePriority[a.role] : 99;
         const pB = rolePriority[b.role] !== undefined ? rolePriority[b.role] : 99;
@@ -82,6 +104,9 @@ export const StaffManagement = () => {
   };
 
   useEffect(() => {
+    if (['Developer', 'OWNER'].includes(currentUser?.role || '')) {
+      fetchCompanies();
+    }
     fetchStaff();
   }, []);
 
@@ -92,6 +117,11 @@ export const StaffManagement = () => {
 
     if (!regName.trim() || !regUsername.trim() || !regPassword) {
       setRegError("Mohon lengkapi semua field bertanda bintang (*).");
+      return;
+    }
+
+    if (['OWNER', 'Developer'].includes(currentUser?.role || '') && !regCompanyId) {
+      setRegError("Mohon pilih Tenant / Company.");
       return;
     }
 
@@ -108,7 +138,8 @@ export const StaffManagement = () => {
     setLoading(true);
     try {
       const email = regEmail.trim() || `${regUsername.trim().toLowerCase()}@gudangpsn.com`;
-      await registerUser(regName, regUsername, email, regRole, regPassword);
+      const overrideCompanyId = ['Developer', 'OWNER'].includes(currentUser?.role || '') && regCompanyId ? regCompanyId : undefined;
+      await registerUser(regName, regUsername, email, regRole, regPassword, overrideCompanyId);
       setRegSuccess(`Sukses mendaftarkan ${regName} sebagai ${regRole}!`);
       
       setRegName('');
@@ -129,12 +160,13 @@ export const StaffManagement = () => {
   // Filter staff based on search keyword
   const filteredStaff = staffList.filter((staff) => {
     const q = searchQuery.toLowerCase();
-    return (
-      (staff.name || '').toLowerCase().includes(q) ||
+    const matchSearch = (staff.name || '').toLowerCase().includes(q) ||
       (staff.username || '').toLowerCase().includes(q) ||
       (staff.email || '').toLowerCase().includes(q) ||
-      (staff.role || '').toLowerCase().includes(q)
-    );
+      (staff.role || '').toLowerCase().includes(q);
+      
+    if (selectedCompanyId === 'ALL') return matchSearch;
+    return matchSearch && staff.companyId === selectedCompanyId;
   });
 
   return (
@@ -236,13 +268,40 @@ export const StaffManagement = () => {
                     className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 font-bold focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none cursor-pointer appearance-none"
                   >
                     <option value="Developer">Developer</option>
+                    <option value="OWNER">Owner</option>
                     <option value="Super Admin">Super Admin</option>
+                    <option value="MANAGER">Manager</option>
+                    <option value="Kepala Gudang">Kepala Gudang</option>
                     <option value="Kepala Gudang JKT">Kepala Gudang JKT</option>
+                    <option value="ADMIN">Admin</option>
                     <option value="Admin A5">Admin A5</option>
                     <option value="Petugas">Petugas</option>
                   </select>
                 </div>
               </div>
+
+              {['OWNER', 'Developer'].includes(currentUser?.role || '') && (
+                <div>
+                  <label htmlFor="regCompanyId" className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5">Pilih Tenant / Company *</label>
+                  <div className="relative">
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
+                      <Cloud className="w-4 h-4" />
+                    </div>
+                    <select
+                      id="regCompanyId"
+                      value={regCompanyId}
+                      onChange={e => setRegCompanyId(e.target.value)}
+                      required
+                      className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 font-bold focus:ring-2 focus:ring-blue-500/10 focus:border-blue-500 outline-none cursor-pointer appearance-none"
+                    >
+                      <option value="" disabled>-- Pilih Tenant --</option>
+                      {companies.map(c => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
 
               <div>
                 <label htmlFor="regPassword" className="block text-[10px] font-black text-slate-500 uppercase tracking-wider mb-1.5">Password *</label>
@@ -315,8 +374,8 @@ export const StaffManagement = () => {
             </button>
           </div>
 
-          <div className="p-4 border-b border-slate-100 bg-white">
-            <div className="relative">
+          <div className="p-4 border-b border-slate-100 bg-white flex items-center gap-3">
+            <div className="relative flex-1">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">
                 <Search className="w-4 h-4" />
               </span>
@@ -328,6 +387,18 @@ export const StaffManagement = () => {
                 className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium focus:ring-1 focus:ring-blue-500 outline-none transition-all placeholder-slate-400"
               />
             </div>
+            {['OWNER', 'Developer'].includes(currentUser?.role || '') && (
+              <select
+                value={selectedCompanyId}
+                onChange={(e) => setSelectedCompanyId(e.target.value)}
+                className="pl-3 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="ALL">Semua Tenant</option>
+                {companies.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            )}
           </div>
 
           <div className="overflow-x-auto">
@@ -364,13 +435,13 @@ export const StaffManagement = () => {
                         </td>
                         <td className="px-6 py-4 text-center">
                           <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-black uppercase tracking-wider ${
-                            staff.role === 'Developer' ? 'bg-purple-100 text-purple-800 border border-purple-200' :
-                            staff.role === 'Super Admin' ? 'bg-red-100 text-red-800 border border-red-200' :
-                            staff.role === 'Kepala Gudang JKT' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
-                            staff.role === 'Admin A5' ? 'bg-blue-100 text-blue-800 border border-blue-200' :
+                            ['Developer', 'OWNER'].includes(staff.role) ? 'bg-purple-100 text-purple-800 border border-purple-200' :
+                            ['Super Admin'].includes(staff.role) ? 'bg-red-100 text-red-800 border border-red-200' :
+                            ['MANAGER', 'Kepala Gudang', 'Kepala Gudang JKT'].includes(staff.role) ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                            ['ADMIN', 'Admin A5'].includes(staff.role) ? 'bg-blue-100 text-blue-800 border border-blue-200' :
                             'bg-slate-100 text-slate-700'
                           }`}>
-                            {staff.role === 'Developer' && <Key className="w-2.5 h-2.5" />}
+                            {['Developer', 'OWNER'].includes(staff.role) && <Key className="w-2.5 h-2.5" />}
                             {staff.role}
                           </span>
                         </td>

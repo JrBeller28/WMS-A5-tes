@@ -169,7 +169,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
 
   // Menghasilkan string rekomendasi alokasi slot dinamis untuk banner AI tetap bersih
   const aiRecommendationSlots = useMemo(() => {
-    if (!selectedSku) return 'Silakan tentukan SKU material terlebih dahulu';
+    if (!selectedSku) return 'Silakan tentukan Kode barang terlebih dahulu';
     if (isVolumeInvalid) return 'Barang tidak valid (volume kosong). Hubungi Super Admin.';
     if (!actualTargetQty || actualTargetQty <= 0) return 'Masukkan kuantitas target pick untuk memetakan lokasi';
     
@@ -475,14 +475,14 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
 
               <div className="space-y-4">
                 <div>
-                  <label className="block text-xs text-slate-600 mb-1 font-semibold">SKU Barang Keluar</label>
+                  <label className="block text-xs text-slate-600 mb-1 font-semibold">Kode Barang Keluar</label>
                   <div className="flex gap-2">
                     <select 
                       value={selectedSku} 
                       onChange={e => setSelectedSku(e.target.value)}
                       className="flex-1 p-2 border border-slate-300 rounded text-xs bg-white outline-none focus:border-[#0055C4] font-medium"
                     >
-                      <option value="">-- Pilih SKU Material --</option>
+                      <option value="">-- Pilih Kode Material --</option>
                       {(products || []).map(p => p && (
                         <option key={p.sku} value={p.sku}>{p.sku} - {p.name}</option>
                       ))}
@@ -490,7 +490,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
                     <button 
                       onClick={() => setShowScanner(true)}
                       className="px-3 bg-blue-50 border border-blue-200 rounded text-blue-600 hover:bg-blue-100 transition-colors flex items-center justify-center shrink-0"
-                      title="Scan QR Code SKU"
+                      title="Scan QR Code Kode"
                     ><QrCode className="w-4 h-4" /></button>
                   </div>
                 </div>
@@ -734,7 +734,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
               <table className="w-full text-left border-collapse text-[10px]">
                 <thead>
                   <tr className="border-b border-black align-bottom">
-                    <th className="py-1 font-bold w-[30%]">ITEM SKU</th>
+                    <th className="py-1 font-bold w-[30%]">KODE BARANG</th>
                     <th className="py-1 font-bold w-[35%]">NAMA PRODUK</th>
                     <th className="py-1 font-bold text-center w-[15%]">KUANTITAS KELUAR</th>
                     <th className="py-1 font-bold text-right w-[20%]">TARGET SLOT RAK</th>
@@ -786,7 +786,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold">
                     <th className="p-2.5">Waktu Booking</th>
-                    <th className="p-2.5">Item SKU</th>
+                    <th className="p-2.5">Kode Barang</th>
                     <th className="p-2.5">Alokasi Pecahan Slot</th>
                     <th className="p-2.5 text-center">Total Pick Qty</th>
                     <th className="p-2.5">Operator</th>
@@ -878,7 +878,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
                 <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold">
                   <th className="p-2.5">Waktu Transaksi</th>
                   <th className="p-2.5">Manifest ID</th>
-                  <th className="p-2.5">SKU Material</th>
+                  <th className="p-2.5">Kode Material</th>
                   <th className="p-2.5">Target Slot Rak</th>
                   <th className="p-2.5 text-center">Total Kuantitas</th>
                   <th className="p-2.5">Operator</th>
@@ -983,7 +983,7 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
           <table className="w-full text-left border-collapse text-[10px]">
             <thead>
               <tr className="border-b border-black align-bottom">
-                <th className="py-1 font-bold w-[30%]">ITEM SKU</th>
+                <th className="py-1 font-bold w-[30%]">KODE BARANG</th>
                 <th className="py-1 font-bold w-[35%]">NAMA PRODUK</th>
                 <th className="py-1 font-bold text-center w-[15%]">QTY</th>
                 <th className="py-1 font-bold text-right w-[20%]">SLOT</th>
@@ -1032,9 +1032,9 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
             if (found) {
               setSelectedSku(found.sku);
               setShowScanner(false);
-              setMessage({ type: 'success', text: `Berhasil scan SKU: ${found.sku}` });
+              setMessage({ type: 'success', text: `Berhasil scan Kode: ${found.sku}` });
             } else {
-              setMessage({ type: 'error', text: `SKU atau Barcode tidak ditemukan: ${text}` });
+              setMessage({ type: 'error', text: `Kode atau Barcode tidak ditemukan: ${text}` });
               setShowScanner(false);
             }
           }} 

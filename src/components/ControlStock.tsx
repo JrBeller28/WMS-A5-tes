@@ -131,7 +131,7 @@ export function ControlStock({ searchQuery = '' }: { searchQuery?: string }) {
     
     // Convert to CSV
     const headers = [
-      'KODE SKU', 'DESKRIPSI NAMA', 'KATEGORI RAK', 'PACKAGING', 'UOM', 'PACK UOM', 
+      'KODE PRODUK', 'DESKRIPSI NAMA', 'KATEGORI RAK', 'PACKAGING', 'UOM', 'PACK UOM', 
       'POSISI RAK (SLOT)', 'QTY IN', 'QTY OUT', 'JUMLAH ON HAND'
     ];
     
@@ -165,7 +165,7 @@ export function ControlStock({ searchQuery = '' }: { searchQuery?: string }) {
             Control Stock
           </h2>
           <p className="text-slate-500 mt-1.5 text-sm">
-            Tabel rincian pergerakan (In & Out) dan On-hand Balance per SKU dan Slot Rak.
+            Tabel rincian pergerakan (In & Out) dan On-hand Balance per Produk dan Slot Rak.
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -177,7 +177,7 @@ export function ControlStock({ searchQuery = '' }: { searchQuery?: string }) {
               type="text"
               value={activeSearchValue}
               onChange={(e) => setLocalSearch(e.target.value)}
-              placeholder="Cari SKU, Nama, Rack..."
+              placeholder="Cari Kode, Nama, Rack..."
               className="w-full pl-9 pr-4 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
@@ -205,7 +205,7 @@ export function ControlStock({ searchQuery = '' }: { searchQuery?: string }) {
           <table className="w-full text-left border-collapse whitespace-nowrap">
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                <th className="px-6 py-4">KODE SKU</th>
+                <th className="px-6 py-4">KODE PRODUK</th>
                 <th className="px-6 py-4">DESKRIPSI NAMA</th>
                 <th className="px-6 py-4">KATEGORI RAK</th>
                 <th className="px-6 py-4">PACKAGING / UOM</th>

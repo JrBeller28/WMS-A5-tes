@@ -88,7 +88,7 @@ export function StockLedger({ globalSearch = '' }: { globalSearch?: string }) {
               <tr>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Waktu</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Tipe</th>
-                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">SKU</th>
+                <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Kode</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Locator</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider text-right">Qty</th>
                 <th className="px-6 py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">Operator</th>
@@ -236,7 +236,7 @@ export function StockLedger({ globalSearch = '' }: { globalSearch?: string }) {
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                  <label className="block text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">SKU</label>
+                  <label className="block text-xs font-bold text-blue-600 uppercase tracking-wider mb-1">Kode</label>
                   <div className="text-lg font-bold font-mono text-blue-900">{selectedTx.sku}</div>
                 </div>
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">

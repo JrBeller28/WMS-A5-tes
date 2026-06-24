@@ -8,11 +8,13 @@ import { auth, db } from '../firebase';
 import { v4 as uuidv4 } from 'uuid';
 
 export const USERS = [
-  { username: 'adminA5', password: 'admin123', role: 'Admin A5', name: 'Iwan Gunawan' },
-  { username: 'petugasA5', password: 'petugas123', role: 'Petugas', name: 'Arief Nugroho' },
-  { username: 'kasiejkt', password: 'kasiejkt123', role: 'Kepala Gudang JKT', name: 'Moch. Johar Prasojo' },
-  { username: 'admin', password: 'admin123', role: 'Super Admin', name: 'HQ Warehouse' },
-  { username: 'adji', password: 'adji123', role: 'Developer', name: 'Adji Prasetyo' }
+  { username: 'adminA5', password: 'admin123', role: 'Admin A5', name: 'Iwan Gunawan', companyId: 'COMPANY_A5_CORP' },
+  { username: 'petugasA5', password: 'petugas123', role: 'Petugas', name: 'Arief Nugroho', companyId: 'COMPANY_A5_CORP' },
+  { username: 'kasiejkt', password: 'kasiejkt123', role: 'Kepala Gudang JKT', name: 'Moch. Johar Prasojo', companyId: 'COMPANY_A5_CORP' },
+  { username: 'admin', password: 'admin123', role: 'Super Admin', name: 'HQ Warehouse', companyId: 'COMPANY_A5_CORP' },
+  { username: 'adji', password: 'adji123', role: 'Developer', name: 'Adji Prasetyo', companyId: 'COMPANY_A5_CORP' },
+  { username: 'adminpps', password: 'pps123', role: 'Super Admin', name: 'Budi (WMS PPS)', companyId: 'COMPANY_PPS' },
+  { username: 'adminbillstone', password: 'billstone123', role: 'Super Admin', name: 'Admin (Gudang Billstone)', companyId: 'COMPANY_BILLSTONE' }
 ];
 
 export const loginUser = async (usernameOrEmail: string, password: string) => {
@@ -48,7 +50,8 @@ export const loginUser = async (usernameOrEmail: string, password: string) => {
         username,
         email,
         role,
-        name
+        name,
+        companyId: staticUser ? staticUser.companyId : 'COMPANY_A5_CORP'
       };
       await setDoc(userDocRef, newProfile);
       loggedInUser = newProfile;
@@ -62,9 +65,11 @@ export const loginUser = async (usernameOrEmail: string, password: string) => {
     });
 
     const sessionUser = {
+      uid: firebaseUser.uid,
       username: loggedInUser.username,
       role: loggedInUser.role,
       name: loggedInUser.name,
+      companyId: loggedInUser.companyId,
       sessionId
     };
 
@@ -88,11 +93,39 @@ export const loginUser = async (usernameOrEmail: string, password: string) => {
           username: staticUser.username,
           email: email,
           role: staticUser.role,
-          name: staticUser.name
+          name: staticUser.name,
+          companyId: staticUser.companyId
         };
 
         // Write the role-based profile to the Firestore users collection
         await setDoc(doc(db, 'users', fbUser.uid), profileData);
+
+        // Seed Company and Subscription if it doesn't exist
+        await setDoc(doc(db, 'companies', staticUser.companyId), {
+          name: staticUser.companyId === 'COMPANY_PPS' ? 'WMS PPS Tenant' : staticUser.companyId === 'COMPANY_BILLSTONE' ? 'Gudang Billstone' : 'Default Tenant',
+          status: 'ACTIVE',
+          createdAt: new Date().toISOString()
+        }, { merge: true });
+
+        await setDoc(doc(db, 'subscriptions', `SUB_${staticUser.companyId}`), {
+          companyId: staticUser.companyId,
+          plan: 'ENTERPRISE',
+          status: 'ACTIVE',
+          startDate: new Date().toISOString(),
+          endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 10)).toISOString(),
+          autoRenew: true,
+          features: {
+              barcodeScanner: true,
+              batch: true,
+              auditLog: true,
+              exportReport: true,
+              multiWarehouse: true,
+              customWorkflow: true,
+              apiIntegration: true,
+          },
+          limits: { users: 9999, products: 99999, warehouses: 99 },
+          createdAt: new Date().toISOString()
+        }, { merge: true });
 
         const sessionId = uuidv4();
         await setDoc(doc(db, 'sessions', staticUser.username), {
@@ -101,9 +134,11 @@ export const loginUser = async (usernameOrEmail: string, password: string) => {
         });
 
         const sessionUser = {
+          uid: fbUser.uid,
           username: staticUser.username,
           role: staticUser.role,
           name: staticUser.name,
+          companyId: staticUser.companyId,
           sessionId
         };
 
@@ -128,7 +163,7 @@ export const loginUser = async (usernameOrEmail: string, password: string) => {
   }
 };
 
-export const registerUser = async (fullName: string, usernameInput: string, emailInput: string, roleInput: string, passwordInput: string) => {
+export const registerUser = async (fullName: string, usernameInput: string, emailInput: string, roleInput: string, passwordInput: string, companyIdOverride?: string) => {
   const username = usernameInput.trim();
   const name = fullName.trim();
   const role = roleInput;
@@ -139,13 +174,18 @@ export const registerUser = async (fullName: string, usernameInput: string, emai
     const userCredential = await createUserWithEmailAndPassword(auth, email, passwordInput);
     const firebaseUser = userCredential.user;
 
+    // Get company ID of the inviting user
+    const loggedInStr = localStorage.getItem('currentUser');
+    const companyId = companyIdOverride || (loggedInStr ? JSON.parse(loggedInStr).companyId || 'COMPANY_A5_CORP' : 'COMPANY_A5_CORP');
+
     // 2. Write details into Firestore users collection
     const profileData = {
       uid: firebaseUser.uid,
       username,
       email,
       role,
-      name
+      name,
+      companyId
     };
     await setDoc(doc(db, 'users', firebaseUser.uid), profileData);
 

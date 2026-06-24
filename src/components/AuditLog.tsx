@@ -100,7 +100,7 @@ export function AuditLog({ globalSearch = '' }: { globalSearch?: string }) {
                     <td className="px-6 py-4 text-sm text-slate-700 flex items-center gap-2">
                        <FileText className="w-4 h-4 text-slate-400" />
                        <span>
-                         Processed <strong className="font-mono">{Math.abs(log.qty)}</strong> units of SKU <strong className="font-mono bg-slate-100 px-1 rounded">{log.sku}</strong> at locator <strong className="font-mono">{log.locatorId}</strong>
+                         Processed <strong className="font-mono">{Math.abs(log.qty)}</strong> units of Kode <strong className="font-mono bg-slate-100 px-1 rounded">{log.sku}</strong> at locator <strong className="font-mono">{log.locatorId}</strong>
                        </span>
                     </td>
                     <td className="px-6 py-4">

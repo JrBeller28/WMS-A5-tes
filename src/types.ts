@@ -9,23 +9,88 @@ export type ZoneCategory =
   | 'RAW_MATERIALS'
   | 'DEFAULT';
 
+export interface Company {
+  id: string;
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+  status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
+  createdAt: string;
+}
+
+export interface SubscriptionPlan {
+  id: string;
+  name: 'FREE TRIAL' | 'BASIC' | 'PRO' | 'ENTERPRISE';
+  price: number;
+  duration: number; // in days
+  features: {
+    barcodeScanner: boolean;
+    batch: boolean;
+    auditLog: boolean;
+    exportReport: boolean;
+    multiWarehouse: boolean;
+    customWorkflow: boolean;
+    apiIntegration: boolean;
+  };
+  limits: {
+    users: number;
+    products: number;
+    warehouses: number;
+  };
+}
+
+export interface Subscription {
+  id: string;
+  companyId: string;
+  plan: 'FREE TRIAL' | 'BASIC' | 'PRO' | 'ENTERPRISE';
+  status: 'ACTIVE' | 'EXPIRED' | 'CANCELED';
+  startDate: string;
+  endDate: string;
+  autoRenew: boolean;
+  createdAt: string;
+  features: SubscriptionPlan['features'];
+}
+
+export type Permission = 
+  | 'product.create' | 'product.update' 
+  | 'inventory.adjust' | 'rack.manage' 
+  | 'inbound.create' | 'outbound.approve' 
+  | 'user.manage' | 'billing.manage';
+
+export type UserRole = 'OWNER' | 'ADMIN' | 'MANAGER' | 'OPERATOR' | 'VIEWER' | 'Super Admin' | 'Developer' | 'Admin A5' | 'Kepala Gudang JKT' | 'Kepala Gudang' | 'Petugas';
+
+export interface UserProfile {
+  uid: string;
+  username: string;
+  email: string;
+  name: string;
+  role: UserRole;
+  companyId: string;
+  permissions?: Permission[];
+}
+
 export interface Product {
   sku: string;
+  companyId?: string; // TEANT ID
+  warehouseId?: string;
   name: string;
   category: ZoneCategory;
-  volumeM3: number; // Volume per unit in M3
+  volumeM3: number;
   uom: string;
   packUom?: string;
   packingSize?: number;
 }
 
 export interface Locator {
-  id: string; // e.g. "R1-A1.1" (Rack R1, Column A1, Level 1)
-  rack: string; // R1
-  column: string; // A1
-  level: number; // 1
+  id: string;
+  companyId?: string; // TENANT ID
+  warehouseId?: string; // Multi-warehouse support
+  rack: string;
+  column: string;
+  level: number;
   zone: ZoneCategory;
-  maxVolumeM3: number; // usually 5.4
+  maxVolumeM3: number;
   barcode?: string;
 }
 
@@ -34,9 +99,11 @@ export type TransactionStatus = 'PENDING' | 'BOOKED' | 'CONFIRMED' | 'CANCELLED'
 
 export interface Transaction {
   id: string;
+  companyId?: string; // TENANT ID
+  warehouseId?: string;
   type: TransactionType;
   sku: string;
-  qty: number; // positive for INBOUND, negative for OUTBOUND/BOOKED physical
+  qty: number;
   locatorId: string;
   operator: string;
   timestamp: string;
@@ -49,6 +116,17 @@ export interface Transaction {
 
 export interface InventoryItem {
   sku: string;
+  companyId?: string; // TENANT ID
+  warehouseId?: string;
   locatorId: string;
   qty: number;
+}
+
+export interface UsageLog {
+  id?: string;
+  companyId: string;
+  feature: string;
+  action: string;
+  count: number;
+  date: string;
 }
