@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Camera, Shield, CheckCircle2, AlertCircle, Zap, Trash2, Printer, Eye, X, QrCode } from 'lucide-react';
 import { Product, Locator, Transaction } from '../types';
-import { getProducts, getPutawayRecommendations, addTransaction, getTransactions, getInventoryDetails, getLocators, getPreferredRacksForCategory } from '../lib/db';
+import { getProducts, getPutawayRecommendations, addTransaction, getTransactions, getInventoryDetails, getLocators, getAlowedRacksForCategory } from '../lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentUser } from '../lib/auth';
 import { QRScanner } from './QRScanner';
@@ -88,8 +88,8 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
 
   const compatibleLocators = locators.filter(l => {
     if (!productDetails?.category) return true;
-    const preferred = getPreferredRacksForCategory(productDetails.category);
-    return preferred.includes(l.rack);
+    const allowedRacks = getAlowedRacksForCategory(productDetails.category);
+    return allowedRacks.includes(l.rack);
   });
 
   // Validasi otomatis saat SKU dipilih
@@ -131,11 +131,7 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
     setLoading(true);
     try {
       const recs = await getPutawayRecommendations(selectedSku, unallocatedQty);
-      const filteredRecs = recs.filter(r => {
-        if (!productDetails?.category) return true;
-        const preferred = getPreferredRacksForCategory(productDetails.category);
-        return preferred.includes(r.rack);
-      });
+      const filteredRecs = recs.filter(r => !productDetails?.category || r.zone === productDetails.category || r.rack.startsWith('FL'));
       setRecommendations(filteredRecs);
     } catch (e: any) {
       console.error(e);
@@ -212,6 +208,18 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
     if (unallocatedQty <= 0) {
       setMessage({ type: 'error', text: 'Seluruh kuantitas barang sudah habis teralokasi ke rak.' });
       return;
+    }
+
+    const targetLoc = locators.find(l => l.id === locId);
+    if (targetLoc && productDetails) {
+      const allowedRacks = getAlowedRacksForCategory(productDetails.category);
+      if (!allowedRacks.includes(targetLoc.rack)) {
+        setMessage({ 
+          type: 'error', 
+          text: `Slot Rak ${locId} (Rak ${targetLoc.rack}) tidak sesuai dengan aturan zonasi baru untuk Kategori "${productDetails.category}".` 
+        });
+        return;
+      }
     }
 
     const unitVolume = productDetails.volumeM3;

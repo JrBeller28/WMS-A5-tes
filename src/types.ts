@@ -1,13 +1,4 @@
-export type ZoneCategory = 
-  | 'FG_PLUMBING'
-  | 'FG_SMART_WATER'
-  | 'FG_FITTING'
-  | 'FG_FILTER'
-  | 'PACKAGING_MATERIALS'
-  | 'ASSEMBLY_KIT'
-  | 'SPECIFIC_AREA'
-  | 'RAW_MATERIALS'
-  | 'DEFAULT';
+export type ZoneCategory = string;
 
 export interface Company {
   id: string;
@@ -75,7 +66,7 @@ export interface Product {
   companyId?: string; // TEANT ID
   warehouseId?: string;
   name: string;
-  category: string;
+  category: ZoneCategory;
   volumeM3: number;
   uom: string;
   packUom?: string;

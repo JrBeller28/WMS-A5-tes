@@ -82,72 +82,141 @@ export const loginUser = async (usernameOrEmail: string, password: string) => {
       u => u.username.toLowerCase() === username.toLowerCase() && u.password === password
     );
 
-    if (staticUser && (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password')) {
-      try {
-        // Let's attempt to create the user in Firebase Auth
-        const createCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const fbUser = createCredential.user;
+    const isQuotaOrLimitError = 
+      String(err.code || '').includes('quota') || 
+      String(err.code || '').includes('exceeded') ||
+      String(err.code || '').includes('resource-exhausted') ||
+      String(err.message || '').toLowerCase().includes('quota') || 
+      String(err.message || '').toLowerCase().includes('exceeded') ||
+      String(err.message || '').toLowerCase().includes('limit') ||
+      String(err.message || '').toLowerCase().includes('exhausted') ||
+      String(err.message || '').toLowerCase().includes('resource');
 
-        const profileData = {
-          uid: fbUser.uid,
-          username: staticUser.username,
-          email: email,
-          role: staticUser.role,
-          name: staticUser.name,
-          companyId: staticUser.companyId
-        };
-
-        // Write the role-based profile to the Firestore users collection
-        await setDoc(doc(db, 'users', fbUser.uid), profileData);
-
-        // Seed Company and Subscription if it doesn't exist
-        await setDoc(doc(db, 'companies', staticUser.companyId), {
-          name: staticUser.companyId === 'COMPANY_PPS' ? 'WMS PPS Tenant' : staticUser.companyId === 'COMPANY_BILLSTONE' ? 'Gudang Billstone' : 'Default Tenant',
-          status: 'ACTIVE',
-          createdAt: new Date().toISOString()
-        }, { merge: true });
-
-        await setDoc(doc(db, 'subscriptions', `SUB_${staticUser.companyId}`), {
-          companyId: staticUser.companyId,
-          plan: 'ENTERPRISE',
-          status: 'ACTIVE',
-          startDate: new Date().toISOString(),
-          endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 10)).toISOString(),
-          autoRenew: true,
-          features: {
-              barcodeScanner: true,
-              batch: true,
-              auditLog: true,
-              exportReport: true,
-              multiWarehouse: true,
-              customWorkflow: true,
-              apiIntegration: true,
-          },
-          limits: { users: 9999, products: 99999, warehouses: 99 },
-          createdAt: new Date().toISOString()
-        }, { merge: true });
-
-        const sessionId = uuidv4();
-        await setDoc(doc(db, 'sessions', staticUser.username), {
-          sessionId,
-          lastActive: new Date().toISOString()
-        });
-
+    if (staticUser) {
+      if (isQuotaOrLimitError || err.code === 'auth/network-request-failed' || err.code === 'auth/internal-error' || err.code === 'resource-exhausted') {
+        const sessionId = 'LOCAL_SESS_' + uuidv4();
         const sessionUser = {
-          uid: fbUser.uid,
+          uid: 'LOCAL_UID_' + staticUser.username,
           username: staticUser.username,
           role: staticUser.role,
           name: staticUser.name,
           companyId: staticUser.companyId,
-          sessionId
+          sessionId,
+          isLocalFallback: true
         };
-
         localStorage.setItem('currentUser', JSON.stringify(sessionUser));
         return sessionUser;
-
-      } catch (signupErr: any) {
-        throw new Error(`Gagal memigrasikan akun default ke Firebase Auth: ${signupErr.message}`);
       }
+
+      if (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password') {
+        try {
+          // Let's attempt to create the user in Firebase Auth
+          const createCredential = await createUserWithEmailAndPassword(auth, email, password);
+          const fbUser = createCredential.user;
+
+          const profileData = {
+            uid: fbUser.uid,
+            username: staticUser.username,
+            email: email,
+            role: staticUser.role,
+            name: staticUser.name,
+            companyId: staticUser.companyId
+          };
+
+          // Write the role-based profile to the Firestore users collection
+          try {
+            await setDoc(doc(db, 'users', fbUser.uid), profileData);
+
+            // Seed Company and Subscription if it doesn't exist
+            await setDoc(doc(db, 'companies', staticUser.companyId), {
+              name: staticUser.companyId === 'COMPANY_PPS' ? 'WMS PPS Tenant' : staticUser.companyId === 'COMPANY_BILLSTONE' ? 'Gudang Billstone' : 'Default Tenant',
+              status: 'ACTIVE',
+              createdAt: new Date().toISOString()
+            }, { merge: true });
+
+            await setDoc(doc(db, 'subscriptions', `SUB_${staticUser.companyId}`), {
+              companyId: staticUser.companyId,
+              plan: 'ENTERPRISE',
+              status: 'ACTIVE',
+              startDate: new Date().toISOString(),
+              endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 10)).toISOString(),
+              autoRenew: true,
+              features: {
+                  barcodeScanner: true,
+                  batch: true,
+                  auditLog: true,
+                  exportReport: true,
+                  multiWarehouse: true,
+                  customWorkflow: true,
+                  apiIntegration: true,
+              },
+              limits: { users: 9999, products: 99999, warehouses: 99 },
+              createdAt: new Date().toISOString()
+            }, { merge: true });
+
+            const sessionId = uuidv4();
+            await setDoc(doc(db, 'sessions', staticUser.username), {
+              sessionId,
+              lastActive: new Date().toISOString()
+            });
+
+            const sessionUser = {
+              uid: fbUser.uid,
+              username: staticUser.username,
+              role: staticUser.role,
+              name: staticUser.name,
+              companyId: staticUser.companyId,
+              sessionId
+            };
+
+            localStorage.setItem('currentUser', JSON.stringify(sessionUser));
+            return sessionUser;
+          } catch (writeErr: any) {
+            console.warn("Firestore write failed during static user setup, falling back to local session", writeErr);
+            const sessionId = 'LOCAL_SESS_' + uuidv4();
+            const sessionUser = {
+              uid: 'LOCAL_UID_' + staticUser.username,
+              username: staticUser.username,
+              role: staticUser.role,
+              name: staticUser.name,
+              companyId: staticUser.companyId,
+              sessionId,
+              isLocalFallback: true
+            };
+            localStorage.setItem('currentUser', JSON.stringify(sessionUser));
+            return sessionUser;
+          }
+
+        } catch (signupErr: any) {
+          // Fallback to local login if creation fails due to quota or other error
+          const sessionId = 'LOCAL_SESS_' + uuidv4();
+          const sessionUser = {
+            uid: 'LOCAL_UID_' + staticUser.username,
+            username: staticUser.username,
+            role: staticUser.role,
+            name: staticUser.name,
+            companyId: staticUser.companyId,
+            sessionId,
+            isLocalFallback: true
+          };
+          localStorage.setItem('currentUser', JSON.stringify(sessionUser));
+          return sessionUser;
+        }
+      }
+
+      // If there's any other error for staticUser, let them login locally
+      const sessionId = 'LOCAL_SESS_' + uuidv4();
+      const sessionUser = {
+        uid: 'LOCAL_UID_' + staticUser.username,
+        username: staticUser.username,
+        role: staticUser.role,
+        name: staticUser.name,
+        companyId: staticUser.companyId,
+        sessionId,
+        isLocalFallback: true
+      };
+      localStorage.setItem('currentUser', JSON.stringify(sessionUser));
+      return sessionUser;
     }
 
     // Map typical Firebase warnings into polite, neat, and highly legible Indonesian warnings
@@ -158,6 +227,8 @@ export const loginUser = async (usernameOrEmail: string, password: string) => {
       friendlyMessage = "Koneksi ke server Firebase gagal. Mohon periksa internet Anda.";
     } else if (err.code === 'auth/too-many-requests') {
       friendlyMessage = "Terlalu banyak percobaan masuk. Silakan tunggu beberapa saat.";
+    } else if (isQuotaOrLimitError || err.code === 'resource-exhausted') {
+      friendlyMessage = "Batas kuota Firebase terlampaui (Quota Exceeded). Menggunakan fallback login lokal...";
     }
     throw new Error(friendlyMessage);
   }

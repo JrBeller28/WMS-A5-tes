@@ -68,10 +68,15 @@ export default function App() {
   useEffect(() => {
     if (!user) return; 
 
+    // Skip concurrent login checks if we are on a local fallback session
+    if (user.sessionId && user.sessionId.startsWith('LOCAL_SESS_')) {
+      return;
+    }
+
     if (user.sessionId) {
-      const unsubscribe = onSnapshot(doc(db, 'sessions', user.username), (doc) => {
-        if (doc.exists()) {
-          const data = doc.data();
+      const unsubscribe = onSnapshot(doc(db, 'sessions', user.username), (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
           if (data.sessionId !== user.sessionId) {
             // Sesi baru terdeteksi, logout otomatis
             logoutUser();

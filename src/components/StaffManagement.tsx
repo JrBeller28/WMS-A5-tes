@@ -36,13 +36,13 @@ export const StaffManagement = () => {
 
   const fetchStaff = async () => {
     setFetchLoading(true);
+    const fbUsers: any[] = [];
     try {
       // Fetch from Firestore users collection
       const q = (['Developer', 'OWNER'].includes(currentUser?.role || '')) 
         ? collection(db, 'users')
         : query(collection(db, 'users'), where('companyId', '==', currentUser?.companyId || ''));
       const querySnapshot = await getDocs(q as any);
-      const fbUsers: any[] = [];
       querySnapshot.forEach((doc) => {
         const data = doc.data() as any;
         fbUsers.push({
@@ -55,7 +55,11 @@ export const StaffManagement = () => {
           isPredefined: false
         });
       });
+    } catch (err) {
+      console.warn('Gagal mengambil daftar staff dari Firestore, menggunakan fallback list:', err);
+    }
 
+    try {
       // Merge with USERS predefined list to guarantee they're shown
       const mergedList = [...fbUsers];
       USERS.forEach((staticUser) => {
@@ -97,7 +101,7 @@ export const StaffManagement = () => {
 
       setStaffList(mergedList);
     } catch (err) {
-      console.error('Gagal mengambil daftar staff:', err);
+      console.error('Gagal memproses daftar staff:', err);
     } finally {
       setFetchLoading(false);
     }

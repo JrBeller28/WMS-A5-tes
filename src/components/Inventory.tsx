@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Plus, Upload, Download, Edit2, Trash2, X, Save, AlertCircle, ChevronDown, CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Product, ZoneCategory, Locator, Transaction } from '../types';
-import { getProducts, addProduct, updateProduct, deleteProduct as deleteProductFromDb, addProductsBatch, getTransactions, getInventoryDetails, getLocators, addProductWithStock, addProductsBatchWithStock, addTransaction, getPreferredRacksForCategory } from '../lib/db';
+import { getProducts, addProduct, updateProduct, deleteProduct as deleteProductFromDb, addProductsBatch, getTransactions, getInventoryDetails, getLocators, addProductWithStock, addProductsBatchWithStock, addTransaction, getAlowedRacksForCategory } from '../lib/db';
 import { getCurrentUser } from '../lib/auth'; // Mengambil fungsi auth
 import { v4 as uuidv4 } from 'uuid';
 
@@ -218,9 +218,9 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
             setMessage({ type: 'error', text: `Posisi Rak Slot "${initialLocatorId}" tidak valid.` });
             return;
           }
-          const preferred = getPreferredRacksForCategory(formData.category || '');
-          if (!preferred.includes(targetLoc.rack)) {
-            setMessage({ type: 'error', text: `Posisi Rak (Slot) ${initialLocatorId} (Rak: ${targetLoc.rack}) tidak sesuai untuk Kategori "${formData.category}".` });
+          const allowedRacks = getAlowedRacksForCategory(formData.category || '');
+          if (!allowedRacks.includes(targetLoc.rack)) {
+            setMessage({ type: 'error', text: `Posisi Rak (Slot) ${initialLocatorId} (Rak ${targetLoc.rack}) tidak sesuai dengan aturan zonasi baru untuk Kategori "${formData.category}".` });
             return;
           }
 
@@ -417,7 +417,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
         if (sku && name && category && volumeM3 !== undefined && volumeM3 !== '') {
           const skuClean = sku.trim().toUpperCase();
           
-          // Gunakan kategori asli sesuai dengan yang di-import
+          // Keep original category name exactly as imported from CSV
           const pCategory = category.trim();
 
           // Validate Volume
@@ -603,19 +603,20 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Category / Zone</label>
-              <input 
-                type="text"
-                list="categories-list"
-                value={formData.category || ''} 
-                onChange={e => setFormData({...formData, category: e.target.value})}
-                className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500 font-semibold text-slate-800 text-sm"
-                placeholder="Ketik atau pilih kategori..."
-              />
-              <datalist id="categories-list">
-                {Array.from(new Set(products.map(p => p.category).filter(Boolean))).map(cat => (
-                  <option key={cat} value={cat} />
-                ))}
-              </datalist>
+              <select 
+                value={formData.category || 'FG_PLUMBING'} 
+                onChange={e => setFormData({...formData, category: e.target.value as ZoneCategory})}
+                className="w-full p-2.5 border border-slate-200 rounded-lg bg-slate-50 focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="FG_PLUMBING">Plumbing</option>
+                <option value="FG_SMART_WATER">Smart Water</option>
+                <option value="FG_FITTING">Fitting</option>
+                <option value="FG_FILTER">Filter</option>
+                <option value="PACKAGING_MATERIALS">Bahan Packing</option>
+                <option value="ASSEMBLY_KIT">Manufacture / Assembly</option>
+                <option value="SPECIFIC_AREA">Spesifik (R9)</option>
+                <option value="RAW_MATERIALS">Raw Materials</option>
+              </select>
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Volume (m³ / Unit)</label>
@@ -805,10 +806,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
                   >
                     <option value="">-- Cari Slot Baru --</option>
                     {locators
-                      .filter(l => {
-                        const preferred = getPreferredRacksForCategory(formData.category || '');
-                        return preferred.includes(l.rack);
-                      })
+                      .filter(l => l.zone === formData.category || l.rack.startsWith('FL'))
                       .filter(l => !editLocStocks.hasOwnProperty(l.id))
                       .sort((a,b) => a.id.localeCompare(b.id, undefined, {numeric: true, sensitivity: 'base'}))
                       .map(l => {

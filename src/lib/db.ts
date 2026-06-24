@@ -57,6 +57,83 @@ const cache: CacheStore = {
   inventoryDetails: null
 };
 
+const saveToLocal = (key: string, data: any) => {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch (e) {
+    console.warn('LocalStorage save failed', e);
+  }
+};
+
+const getFromLocal = (key: string): any => {
+  try {
+    const val = localStorage.getItem(key);
+    return val ? JSON.parse(val) : null;
+  } catch (e) {
+    return null;
+  }
+};
+
+const addProductLocal = (product: Product) => {
+  const companyId = product.companyId || getCurrentCompanyId();
+  if (!companyId) return;
+  const list = getFromLocal('local_products_' + companyId) || [];
+  const index = list.findIndex((p: any) => p.sku === product.sku);
+  if (index >= 0) {
+    list[index] = product;
+  } else {
+    list.push(product);
+  }
+  saveToLocal('local_products_' + companyId, list);
+  cache.products = list;
+};
+
+const deleteProductLocal = (sku: string) => {
+  const companyId = getCurrentCompanyId();
+  if (!companyId) return;
+  const list = getFromLocal('local_products_' + companyId) || [];
+  const updated = list.filter((p: any) => p.sku !== sku);
+  saveToLocal('local_products_' + companyId, updated);
+  cache.products = updated;
+};
+
+const addLocatorLocal = (locator: Locator) => {
+  const companyId = locator.companyId || getCurrentCompanyId();
+  if (!companyId) return;
+  const list = getFromLocal('local_locators_' + companyId) || [];
+  const index = list.findIndex((l: any) => l.id === locator.id);
+  if (index >= 0) {
+    list[index] = locator;
+  } else {
+    list.push(locator);
+  }
+  saveToLocal('local_locators_' + companyId, list);
+  cache.locators = list;
+};
+
+const deleteLocatorLocal = (id: string) => {
+  const companyId = getCurrentCompanyId();
+  if (!companyId) return;
+  const list = getFromLocal('local_locators_' + companyId) || [];
+  const updated = list.filter((l: any) => l.id !== id);
+  saveToLocal('local_locators_' + companyId, updated);
+  cache.locators = updated;
+};
+
+const addTransactionLocal = (tx: Transaction) => {
+  const companyId = tx.companyId || getCurrentCompanyId();
+  if (!companyId) return;
+  const list = getFromLocal('local_transactions_' + companyId) || [];
+  const index = list.findIndex((t: any) => t.id === tx.id);
+  if (index >= 0) {
+    list[index] = tx;
+  } else {
+    list.unshift(tx);
+  }
+  saveToLocal('local_transactions_' + companyId, list);
+  cache.transactions = list;
+};
+
 interface PromiseStore {
   products: Promise<Product[]> | null;
   locators: Promise<Locator[]> | null;
@@ -107,15 +184,32 @@ export const getProducts = async (): Promise<Product[]> => {
 
   promises.products = (async () => {
     const companyId = getCurrentCompanyId();
-    const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'products'), where('companyId', '==', companyId)) : collection(db, 'products');
-    const snapshot = await getDocs(q as any);
-    const products: Product[] = [];
-    snapshot.forEach(doc => {
-      products.push(doc.data() as Product);
-    });
-    cache.products = products;
-    promises.products = null;
-    return products;
+    try {
+      const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'products'), where('companyId', '==', companyId)) : collection(db, 'products');
+      const snapshot = await getDocs(q as any);
+      const products: Product[] = [];
+      snapshot.forEach(doc => {
+        products.push(doc.data() as Product);
+      });
+      if (companyId) {
+        saveToLocal('local_products_' + companyId, products);
+      }
+      cache.products = products;
+      promises.products = null;
+      return products;
+    } catch (err) {
+      console.warn("getProducts Firestore failed, trying local storage", err);
+      const fallback = companyId ? getFromLocal('local_products_' + companyId) : null;
+      if (fallback) {
+        cache.products = fallback;
+        promises.products = null;
+        return fallback;
+      }
+      const empty: Product[] = [];
+      cache.products = empty;
+      promises.products = null;
+      return empty;
+    }
   })();
 
   return promises.products;
@@ -128,15 +222,32 @@ export const getLocators = async (): Promise<Locator[]> => {
 
   promises.locators = (async () => {
     const companyId = getCurrentCompanyId();
-    const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'locators'), where('companyId', '==', companyId)) : collection(db, 'locators');
-    const snapshot = await getDocs(q as any);
-    const locators: Locator[] = [];
-    snapshot.forEach(doc => {
-      locators.push(doc.data() as Locator);
-    });
-    cache.locators = locators;
-    promises.locators = null;
-    return locators;
+    try {
+      const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'locators'), where('companyId', '==', companyId)) : collection(db, 'locators');
+      const snapshot = await getDocs(q as any);
+      const locators: Locator[] = [];
+      snapshot.forEach(doc => {
+        locators.push(doc.data() as Locator);
+      });
+      if (companyId) {
+        saveToLocal('local_locators_' + companyId, locators);
+      }
+      cache.locators = locators;
+      promises.locators = null;
+      return locators;
+    } catch (err) {
+      console.warn("getLocators Firestore failed, trying local storage", err);
+      const fallback = companyId ? getFromLocal('local_locators_' + companyId) : null;
+      if (fallback) {
+        cache.locators = fallback;
+        promises.locators = null;
+        return fallback;
+      }
+      const empty: Locator[] = [];
+      cache.locators = empty;
+      promises.locators = null;
+      return empty;
+    }
   })();
 
   return promises.locators;
@@ -144,36 +255,61 @@ export const getLocators = async (): Promise<Locator[]> => {
 
 export const addLocator = async (locator: Locator) => {
   locator.companyId = locator.companyId || getCurrentCompanyId();
-  await setDoc(doc(db, 'locators', locator.id), locator);
+  addLocatorLocal(locator);
+  try {
+    await setDoc(doc(db, 'locators', locator.id), locator);
+  } catch (err) {
+    console.warn("addLocator Firestore failed, using local only", err);
+  }
   clearCache('locators');
 };
 
 export const updateLocator = async (id: string, data: Partial<Locator>) => {
-  await updateDoc(doc(db, 'locators', id), data as any);
+  const companyId = getCurrentCompanyId();
+  const list = getFromLocal('local_locators_' + companyId) || [];
+  const index = list.findIndex((l: any) => l.id === id);
+  if (index >= 0) {
+    list[index] = { ...list[index], ...data };
+    saveToLocal('local_locators_' + companyId, list);
+    cache.locators = list;
+  }
+  try {
+    await updateDoc(doc(db, 'locators', id), data as any);
+  } catch (err) {
+    console.warn("updateLocator Firestore failed, using local only", err);
+  }
   clearCache('locators');
 };
 
 export const deleteLocator = async (id: string) => {
-  await deleteDoc(doc(db, 'locators', id));
+  deleteLocatorLocal(id);
+  try {
+    await deleteDoc(doc(db, 'locators', id));
+  } catch (err) {
+    console.warn("deleteLocator Firestore failed, using local only", err);
+  }
   clearCache('locators');
 };
 
 export const addProduct = async (product: Product) => {
   product.companyId = product.companyId || getCurrentCompanyId();
-  await setDoc(doc(db, 'products', getProductDocId(product.sku)), product);
+  addProductLocal(product);
+  try {
+    await setDoc(doc(db, 'products', getProductDocId(product.sku)), product);
+  } catch (err) {
+    console.warn("addProduct Firestore failed, using local only", err);
+  }
   clearCache('products');
 };
 
 export const addProductWithStock = async (product: Product, qty: number, locatorId: string, operator: string) => {
   product.companyId = product.companyId || getCurrentCompanyId();
-  const batch = writeBatch(db);
-  const productRef = doc(db, 'products', getProductDocId(product.sku));
-  batch.set(productRef, product);
+  addProductLocal(product);
 
+  let tx: Transaction | null = null;
   if (qty > 0 && locatorId) {
     const txId = uuidv4();
-    const txRef = doc(db, 'transactions', txId);
-    batch.set(txRef, {
+    tx = {
       id: txId,
       companyId: product.companyId,
       type: 'INBOUND',
@@ -184,30 +320,70 @@ export const addProductWithStock = async (product: Product, qty: number, locator
       timestamp: new Date().toISOString(),
       status: 'CONFIRMED',
       memo: 'Initial On-Hand Stock Setup'
-    });
+    };
+    addTransactionLocal(tx);
   }
-  await batch.commit();
+
+  try {
+    const batch = writeBatch(db);
+    const productRef = doc(db, 'products', getProductDocId(product.sku));
+    batch.set(productRef, product);
+
+    if (tx) {
+      const txRef = doc(db, 'transactions', tx.id);
+      batch.set(txRef, tx);
+    }
+    await batch.commit();
+  } catch (err) {
+    console.warn("addProductWithStock Firestore failed, using local only", err);
+  }
+
   clearCache('products');
   clearCache('transactions');
 };
 
 export const updateProduct = async (sku: string, data: Partial<Product>) => {
-  await updateDoc(doc(db, 'products', getProductDocId(sku)), data as any);
+  const companyId = getCurrentCompanyId();
+  const list = getFromLocal('local_products_' + companyId) || [];
+  const index = list.findIndex((p: any) => p.sku === sku);
+  if (index >= 0) {
+    list[index] = { ...list[index], ...data };
+    saveToLocal('local_products_' + companyId, list);
+    cache.products = list;
+  }
+  try {
+    await updateDoc(doc(db, 'products', getProductDocId(sku)), data as any);
+  } catch (err) {
+    console.warn("updateProduct Firestore failed, using local only", err);
+  }
   clearCache('products');
 };
 
 export const deleteProduct = async (sku: string) => {
-  await deleteDoc(doc(db, 'products', getProductDocId(sku)));
+  deleteProductLocal(sku);
+  try {
+    await deleteDoc(doc(db, 'products', getProductDocId(sku)));
+  } catch (err) {
+    console.warn("deleteProduct Firestore failed, using local only", err);
+  }
   clearCache('products');
 };
 
 export const addProductsBatch = async (products: Product[]) => {
-  const batch = writeBatch(db);
   for (const p of products) {
-    const ref = doc(db, 'products', getProductDocId(p.sku));
-    batch.set(ref, p, { merge: true });
+    p.companyId = p.companyId || getCurrentCompanyId();
+    addProductLocal(p);
   }
-  await batch.commit();
+  try {
+    const batch = writeBatch(db);
+    for (const p of products) {
+      const ref = doc(db, 'products', getProductDocId(p.sku));
+      batch.set(ref, p, { merge: true });
+    }
+    await batch.commit();
+  } catch (err) {
+    console.warn("addProductsBatch Firestore failed, using local only", err);
+  }
   clearCache('products');
 };
 
@@ -216,16 +392,15 @@ export const addProductsBatchWithStock = async (
   operator: string
 ) => {
   const companyId = getCurrentCompanyId();
-  const batch = writeBatch(db);
+  const txsToCreate: Transaction[] = [];
+
   for (const item of items) {
     item.product.companyId = item.product.companyId || companyId;
-    const productRef = doc(db, 'products', getProductDocId(item.product.sku));
-    batch.set(productRef, item.product, { merge: true });
+    addProductLocal(item.product);
 
     if (item.qty && item.qty > 0 && item.locatorId) {
       const txId = uuidv4();
-      const txRef = doc(db, 'transactions', txId);
-      batch.set(txRef, {
+      const tx: Transaction = {
         id: txId,
         companyId: item.product.companyId,
         type: 'INBOUND',
@@ -236,10 +411,27 @@ export const addProductsBatchWithStock = async (
         timestamp: new Date().toISOString(),
         status: 'CONFIRMED',
         memo: 'CSV Import Stock Setup'
-      });
+      };
+      txsToCreate.push(tx);
+      addTransactionLocal(tx);
     }
   }
-  await batch.commit();
+
+  try {
+    const batch = writeBatch(db);
+    for (const item of items) {
+      const productRef = doc(db, 'products', getProductDocId(item.product.sku));
+      batch.set(productRef, item.product, { merge: true });
+    }
+    for (const tx of txsToCreate) {
+      const txRef = doc(db, 'transactions', tx.id);
+      batch.set(txRef, tx);
+    }
+    await batch.commit();
+  } catch (err) {
+    console.warn("addProductsBatchWithStock Firestore failed, using local only", err);
+  }
+
   clearCache('products');
   clearCache('transactions');
 };
@@ -251,17 +443,33 @@ export const getTransactions = async (): Promise<Transaction[]> => {
 
   promises.transactions = (async () => {
     const companyId = getCurrentCompanyId();
-    const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'transactions'), where('companyId', '==', companyId)) : collection(db, 'transactions');
-    const snapshot = await getDocs(q as any);
-    const transactions: Transaction[] = [];
-    snapshot.forEach(doc => {
-      transactions.push(doc.data() as Transaction);
-    });
-    // Sort by timestamp desc
-    const sorted = transactions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    cache.transactions = sorted;
-    promises.transactions = null;
-    return sorted;
+    try {
+      const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'transactions'), where('companyId', '==', companyId)) : collection(db, 'transactions');
+      const snapshot = await getDocs(q as any);
+      const transactions: Transaction[] = [];
+      snapshot.forEach(doc => {
+        transactions.push(doc.data() as Transaction);
+      });
+      const sorted = transactions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      if (companyId) {
+        saveToLocal('local_transactions_' + companyId, sorted);
+      }
+      cache.transactions = sorted;
+      promises.transactions = null;
+      return sorted;
+    } catch (err) {
+      console.warn("getTransactions Firestore failed, trying local storage", err);
+      const fallback = companyId ? getFromLocal('local_transactions_' + companyId) : null;
+      if (fallback) {
+        cache.transactions = fallback;
+        promises.transactions = null;
+        return fallback;
+      }
+      const empty: Transaction[] = [];
+      cache.transactions = empty;
+      promises.transactions = null;
+      return empty;
+    }
   })();
 
   return promises.transactions;
@@ -269,12 +477,29 @@ export const getTransactions = async (): Promise<Transaction[]> => {
 
 export const addTransaction = async (tx: Transaction) => {
   tx.companyId = tx.companyId || getCurrentCompanyId();
-  await setDoc(doc(db, 'transactions', tx.id), tx);
+  addTransactionLocal(tx);
+  try {
+    await setDoc(doc(db, 'transactions', tx.id), tx);
+  } catch (err) {
+    console.warn("addTransaction Firestore failed, using local only", err);
+  }
   clearCache('transactions');
 };
 
 export const updateTransactionStatus = async (id: string, status: Transaction['status']) => {
-  await updateDoc(doc(db, 'transactions', id), { status });
+  const companyId = getCurrentCompanyId();
+  const list = getFromLocal('local_transactions_' + companyId) || [];
+  const index = list.findIndex((t: any) => t.id === id);
+  if (index >= 0) {
+    list[index] = { ...list[index], status };
+    saveToLocal('local_transactions_' + companyId, list);
+    cache.transactions = list;
+  }
+  try {
+    await updateDoc(doc(db, 'transactions', id), { status });
+  } catch (err) {
+    console.warn("updateTransactionStatus Firestore failed, using local only", err);
+  }
   clearCache('transactions');
 };
 
@@ -523,24 +748,40 @@ export const transferInventory = async (sku: string, fromLocatorId: string, toLo
   clearCache('transactions');
 };
 
-export const getPreferredRacksForCategory = (category: string): string[] => {
-  const cat = (category || '').trim().toUpperCase();
-  if (cat === 'PLUMBING' || cat === 'FG_PLUMBING' || cat.includes('PLUMBING')) {
+export const getAlowedRacksForCategory = (category: string): string[] => {
+  const cat = (category || '').trim().toUpperCase().replace(/[\s-_]+/g, ' ');
+  
+  if (cat.includes('PLUMBING') || cat.includes('PLUMB')) {
     return ['R1', 'FL-A', 'FL-B'];
   }
-  if (cat === 'FILTER' || cat === 'FG_FILTER' || cat.includes('FILTER')) {
+  if (cat.includes('WATER FILTER') || cat.includes('FG WATER FILTER') || cat.includes('FG_WATER_FILTER')) {
+    return ['R7'];
+  }
+  if (cat.includes('FILTER') || cat.includes('FG FILTER')) {
     return ['R2', 'R3'];
   }
-  if (cat === 'SMART WATER' || cat === 'FG_SMART_WATER' || cat.includes('SMART WATER') || cat.includes('SMART_WATER')) {
+  if (cat.includes('SMART WATER') || cat.includes('SMART_WATER') || cat.includes('FG SMART WATER') || cat.includes('FG_SMART_WATER')) {
     return ['R4', 'FL-E', 'FL-F'];
   }
-  if (cat === 'FITTING' || cat === 'FG_FITTING' || cat.includes('FITTING')) {
+  if (cat.includes('FITTING') || cat.includes('FG FITTING') || cat.includes('FG_FITTING')) {
     return ['R5', 'FL-E', 'FL-F'];
   }
-  if (cat === 'PACKAGING MATERIALS' || cat === 'PACKAGING_MATERIALS' || cat === 'FG AKSESORIS' || cat === 'FG_AKSESORIS' || cat.includes('PACKAGING') || cat.includes('AKSESORIS')) {
+  if (
+    cat.includes('PACKAGING') || 
+    cat.includes('PACKAGING MATERIALS') || 
+    cat.includes('PACKAGING_MATERIALS') || 
+    cat.includes('AKSESORIS') || 
+    cat.includes('ACCESSOR')
+  ) {
     return ['R6'];
   }
-  if (cat === 'FG_OTO_VALVE' || cat === 'FG_WATER_FILTER' || cat === 'PERSEDIAAN PART MESIN' || cat.includes('VALVE') || cat.includes('WATER_FILTER') || cat.includes('PART_MESIN') || cat.includes('PART MESIN') || cat.includes('PERS_PART')) {
+  if (
+    cat.includes('OTO VALVE') || 
+    cat.includes('OTO_VALVE') || 
+    cat.includes('PART MESIN') || 
+    cat.includes('PART_MESIN') || 
+    cat.includes('PERSEDIAAN PART MESIN')
+  ) {
     return ['R7'];
   }
   return ['R8'];
@@ -582,11 +823,10 @@ export const getPutawayRecommendations = async (sku: string, qty: number) => {
          if (a.rack.startsWith('FL') && !b.rack.startsWith('FL')) return 1;
          if (!a.rack.startsWith('FL') && b.rack.startsWith('FL')) return -1;
          return a.level - b.level;
-      });
+       });
     };
 
-    const preferredRacks = getPreferredRacksForCategory(product.category);
-
+    const preferredRacks = getAlowedRacksForCategory(product.category);
     const preferredLocators = locators.filter(l => preferredRacks.includes(l.rack));
     let availableLocators = getAvailable(preferredLocators);
 
@@ -613,10 +853,23 @@ export const seedDatabase = async () => {
             return;
         }
 
-        const q = query(collection(db, 'locators'), where('companyId', '==', companyId));
-        const lDocs = await getDocs(q);
-        if (lDocs.size > 0) {
-            console.log("Database already seeded, skipping seedDatabase.");
+        const locLocal = getFromLocal('local_locators_' + companyId);
+        if (locLocal && locLocal.length > 0) {
+            console.log("Local database already seeded, skipping seedDatabase.");
+            return;
+        }
+
+        let lDocsSize = 0;
+        try {
+          const q = query(collection(db, 'locators'), where('companyId', '==', companyId));
+          const lDocs = await getDocs(q);
+          lDocsSize = lDocs.size;
+        } catch (e) {
+          console.warn("Firestore query failed during seed check, proceeding with local seed", e);
+        }
+
+        if (lDocsSize > 0) {
+            console.log("Database already seeded on Firestore, skipping seedDatabase.");
             return;
         }
 
@@ -706,30 +959,44 @@ export const seedDatabase = async () => {
           tx.warehouseId = warehouseId;
         }
 
-        const batch = writeBatch(db);
-        
-        for (const loc of locators) {
-          batch.set(doc(db, 'locators', loc.id), loc);
-        }
-        for (const p of products) {
-            batch.set(doc(db, 'products', getProductDocId(p.sku)), p);
-        }
-        for (const tx of dummyTransactions) {
-            batch.set(doc(db, 'transactions', tx.id), tx);
+        // Save to localStorage so it's instantly usable
+        saveToLocal('local_locators_' + companyId, locators);
+        saveToLocal('local_products_' + companyId, products);
+        saveToLocal('local_transactions_' + companyId, dummyTransactions);
+
+        try {
+          const batch = writeBatch(db);
+          for (const loc of locators) {
+            batch.set(doc(db, 'locators', loc.id), loc);
+          }
+          for (const p of products) {
+              batch.set(doc(db, 'products', getProductDocId(p.sku)), p);
+          }
+          for (const tx of dummyTransactions) {
+              batch.set(doc(db, 'transactions', tx.id), tx);
+          }
+          await batch.commit();
+        } catch (err) {
+          console.warn("seedDatabase Firestore write failed, using local seed only", err);
         }
 
-        await batch.commit();
         clearCache();
 
     } catch (err) {
         console.error("Failed to seed db", err);
     }
-}
+};
 
 export const savePhysicalStockCount = async (locatorId: string, sku: string, qty: number) => {
+  const companyId = getCurrentCompanyId();
+  const key = 'local_physical_counts_' + companyId;
+  const docId = `${locatorId}_${sku}`;
+  const localCounts = getFromLocal(key) || {};
+  localCounts[docId] = qty;
+  saveToLocal(key, localCounts);
+  cache.physicalStockCounts = localCounts;
+
   try {
-    const docId = `${locatorId}_${sku}`;
-    const companyId = getCurrentCompanyId();
     await setDoc(doc(db, 'physical_stock_counts', docId), {
       companyId,
       locatorId,
@@ -749,8 +1016,9 @@ export const getPhysicalStockCounts = async () => {
   if (promises.physicalStockCounts) return promises.physicalStockCounts;
 
   promises.physicalStockCounts = (async () => {
+    const companyId = getCurrentCompanyId();
+    const key = 'local_physical_counts_' + companyId;
     try {
-      const companyId = getCurrentCompanyId();
       const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'physical_stock_counts'), where('companyId', '==', companyId)) : collection(db, 'physical_stock_counts');
       const snapshot = await getDocs(q as any);
       const counts: Record<string, number> = {};
@@ -758,13 +1026,16 @@ export const getPhysicalStockCounts = async () => {
         const data = doc.data() as any;
         counts[doc.id] = data.qty;
       });
+      saveToLocal(key, counts);
       cache.physicalStockCounts = counts;
       promises.physicalStockCounts = null;
       return counts;
     } catch (err) {
       console.error("Error getting physical counts:", err);
+      const fallback = getFromLocal(key) || {};
+      cache.physicalStockCounts = fallback;
       promises.physicalStockCounts = null;
-      return {};
+      return fallback;
     }
   })();
 
@@ -774,25 +1045,33 @@ export const getPhysicalStockCounts = async () => {
 export const resetStockAndTransactions = async () => {
   const companyId = getCurrentCompanyId();
   if (!companyId) return;
-  const collectionsToDelete = ['products', 'transactions'];
-  for (const collName of collectionsToDelete) {
-    const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, collName), where('companyId', '==', companyId)) : collection(db, collName);
-    const snapshot = await getDocs(q as any);
-    let batch = writeBatch(db);
-    let count = 0;
-    
-    for (const docSnap of snapshot.docs) {
-      batch.delete(docSnap.ref);
-      count++;
-      if (count === 500) {
+
+  saveToLocal('local_products_' + companyId, []);
+  saveToLocal('local_transactions_' + companyId, []);
+
+  try {
+    const collectionsToDelete = ['products', 'transactions'];
+    for (const collName of collectionsToDelete) {
+      const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, collName), where('companyId', '==', companyId)) : collection(db, collName);
+      const snapshot = await getDocs(q as any);
+      let batch = writeBatch(db);
+      let count = 0;
+      
+      for (const docSnap of snapshot.docs) {
+        batch.delete(docSnap.ref);
+        count++;
+        if (count === 500) {
+          await batch.commit();
+          batch = writeBatch(db);
+          count = 0;
+        }
+      }
+      if (count > 0) {
         await batch.commit();
-        batch = writeBatch(db);
-        count = 0;
       }
     }
-    if (count > 0) {
-      await batch.commit();
-    }
+  } catch (err) {
+    console.error("resetStockAndTransactions Firestore fail, using local clear", err);
   }
   clearCache();
 };

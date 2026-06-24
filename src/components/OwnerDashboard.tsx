@@ -10,10 +10,20 @@ export function OwnerDashboard() {
 
   useEffect(() => {
     async function loadStats() {
-      // Load companies
-      const cmpSnap = await getDocs(query(collection(db, 'companies')));
       const companiesData: any[] = [];
-      cmpSnap.forEach(doc => companiesData.push({ id: doc.id, ...doc.data() }));
+      try {
+        // Load companies from Firestore
+        const cmpSnap = await getDocs(query(collection(db, 'companies')));
+        cmpSnap.forEach(doc => companiesData.push({ id: doc.id, ...doc.data() }));
+      } catch (err) {
+        console.warn("OwnerDashboard Gagal mengambil perusahaan dari Firestore, menggunakan fallback lokal:", err);
+        // Fallback static companies list
+        companiesData.push(
+          { id: 'COMPANY_A5_CORP', name: 'Gudang Utama A5 Corp', status: 'ACTIVE' },
+          { id: 'COMPANY_PPS', name: 'WMS PPS Tenant', status: 'ACTIVE' },
+          { id: 'COMPANY_BILLSTONE', name: 'Gudang Billstone', status: 'ACTIVE' }
+        );
+      }
 
       const statsData = [];
 
@@ -26,7 +36,19 @@ export function OwnerDashboard() {
              const data = doc.data();
              if(data.companyId === company.id) usersCount++;
           });
-        } catch(e){}
+        } catch(e){
+          // Local fallback count based on static USERS list
+          const USERS = [
+            { username: 'adminA5', companyId: 'COMPANY_A5_CORP' },
+            { username: 'petugasA5', companyId: 'COMPANY_A5_CORP' },
+            { username: 'kasiejkt', companyId: 'COMPANY_A5_CORP' },
+            { username: 'admin', companyId: 'COMPANY_A5_CORP' },
+            { username: 'adji', companyId: 'COMPANY_A5_CORP' },
+            { username: 'adminpps', companyId: 'COMPANY_PPS' },
+            { username: 'adminbillstone', companyId: 'COMPANY_BILLSTONE' }
+          ];
+          usersCount = USERS.filter(u => u.companyId === company.id).length;
+        }
 
         // SKUs
         let skusCount = 0;
