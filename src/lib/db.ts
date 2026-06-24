@@ -40,44 +40,128 @@ export const isGlobalDeveloper = () => {
     return false;
 }
 
+// Global In-Memory Cache layer for rapid data loads and 0-delay page/tab switching
+interface CacheStore {
+  products: Product[] | null;
+  locators: Locator[] | null;
+  transactions: Transaction[] | null;
+  physicalStockCounts: any | null;
+  inventoryDetails: any | null;
+}
+
+const cache: CacheStore = {
+  products: null,
+  locators: null,
+  transactions: null,
+  physicalStockCounts: null,
+  inventoryDetails: null
+};
+
+interface PromiseStore {
+  products: Promise<Product[]> | null;
+  locators: Promise<Locator[]> | null;
+  transactions: Promise<Transaction[]> | null;
+  physicalStockCounts: Promise<any> | null;
+  inventoryDetails: Promise<any> | null;
+}
+
+const promises: PromiseStore = {
+  products: null,
+  locators: null,
+  transactions: null,
+  physicalStockCounts: null,
+  inventoryDetails: null
+};
+
+let cachedCompanyId: string | null = null;
+
+export const clearCache = (type?: keyof CacheStore) => {
+  if (type) {
+    cache[type] = null;
+    promises[type] = null;
+    // Clearing dependent caches
+    if (type === 'transactions' || type === 'products' || type === 'locators') {
+      cache.inventoryDetails = null;
+      promises.inventoryDetails = null;
+    }
+  } else {
+    for (const key of Object.keys(cache) as (keyof CacheStore)[]) {
+      cache[key] = null;
+      promises[key] = null;
+    }
+  }
+};
+
+const checkCompanyChanged = () => {
+  const currentCompanyId = getCurrentCompanyId();
+  if (cachedCompanyId !== currentCompanyId) {
+    clearCache();
+    cachedCompanyId = currentCompanyId;
+  }
+};
+
 export const getProducts = async (): Promise<Product[]> => {
-  const companyId = getCurrentCompanyId();
-  const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'products'), where('companyId', '==', companyId)) : collection(db, 'products');
-  const snapshot = await getDocs(q as any);
-  const products: Product[] = [];
-  snapshot.forEach(doc => {
-    products.push(doc.data() as Product);
-  });
-  return products;
+  checkCompanyChanged();
+  if (cache.products) return cache.products;
+  if (promises.products) return promises.products;
+
+  promises.products = (async () => {
+    const companyId = getCurrentCompanyId();
+    const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'products'), where('companyId', '==', companyId)) : collection(db, 'products');
+    const snapshot = await getDocs(q as any);
+    const products: Product[] = [];
+    snapshot.forEach(doc => {
+      products.push(doc.data() as Product);
+    });
+    cache.products = products;
+    promises.products = null;
+    return products;
+  })();
+
+  return promises.products;
 };
 
 export const getLocators = async (): Promise<Locator[]> => {
-  const companyId = getCurrentCompanyId();
-  const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'locators'), where('companyId', '==', companyId)) : collection(db, 'locators');
-  const snapshot = await getDocs(q as any);
-  const locators: Locator[] = [];
-  snapshot.forEach(doc => {
-    locators.push(doc.data() as Locator);
-  });
-  return locators;
+  checkCompanyChanged();
+  if (cache.locators) return cache.locators;
+  if (promises.locators) return promises.locators;
+
+  promises.locators = (async () => {
+    const companyId = getCurrentCompanyId();
+    const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'locators'), where('companyId', '==', companyId)) : collection(db, 'locators');
+    const snapshot = await getDocs(q as any);
+    const locators: Locator[] = [];
+    snapshot.forEach(doc => {
+      locators.push(doc.data() as Locator);
+    });
+    cache.locators = locators;
+    promises.locators = null;
+    return locators;
+  })();
+
+  return promises.locators;
 };
 
 export const addLocator = async (locator: Locator) => {
   locator.companyId = locator.companyId || getCurrentCompanyId();
   await setDoc(doc(db, 'locators', locator.id), locator);
+  clearCache('locators');
 };
 
 export const updateLocator = async (id: string, data: Partial<Locator>) => {
   await updateDoc(doc(db, 'locators', id), data as any);
+  clearCache('locators');
 };
 
 export const deleteLocator = async (id: string) => {
   await deleteDoc(doc(db, 'locators', id));
+  clearCache('locators');
 };
 
 export const addProduct = async (product: Product) => {
   product.companyId = product.companyId || getCurrentCompanyId();
   await setDoc(doc(db, 'products', getProductDocId(product.sku)), product);
+  clearCache('products');
 };
 
 export const addProductWithStock = async (product: Product, qty: number, locatorId: string, operator: string) => {
@@ -103,14 +187,18 @@ export const addProductWithStock = async (product: Product, qty: number, locator
     });
   }
   await batch.commit();
+  clearCache('products');
+  clearCache('transactions');
 };
 
 export const updateProduct = async (sku: string, data: Partial<Product>) => {
   await updateDoc(doc(db, 'products', getProductDocId(sku)), data as any);
+  clearCache('products');
 };
 
 export const deleteProduct = async (sku: string) => {
   await deleteDoc(doc(db, 'products', getProductDocId(sku)));
+  clearCache('products');
 };
 
 export const addProductsBatch = async (products: Product[]) => {
@@ -120,6 +208,7 @@ export const addProductsBatch = async (products: Product[]) => {
     batch.set(ref, p, { merge: true });
   }
   await batch.commit();
+  clearCache('products');
 };
 
 export const addProductsBatchWithStock = async (
@@ -151,27 +240,42 @@ export const addProductsBatchWithStock = async (
     }
   }
   await batch.commit();
+  clearCache('products');
+  clearCache('transactions');
 };
 
 export const getTransactions = async (): Promise<Transaction[]> => {
-  const companyId = getCurrentCompanyId();
-  const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'transactions'), where('companyId', '==', companyId)) : collection(db, 'transactions');
-  const snapshot = await getDocs(q as any);
-  const transactions: Transaction[] = [];
-  snapshot.forEach(doc => {
-    transactions.push(doc.data() as Transaction);
-  });
-  // Sort by timestamp desc
-  return transactions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  checkCompanyChanged();
+  if (cache.transactions) return cache.transactions;
+  if (promises.transactions) return promises.transactions;
+
+  promises.transactions = (async () => {
+    const companyId = getCurrentCompanyId();
+    const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'transactions'), where('companyId', '==', companyId)) : collection(db, 'transactions');
+    const snapshot = await getDocs(q as any);
+    const transactions: Transaction[] = [];
+    snapshot.forEach(doc => {
+      transactions.push(doc.data() as Transaction);
+    });
+    // Sort by timestamp desc
+    const sorted = transactions.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    cache.transactions = sorted;
+    promises.transactions = null;
+    return sorted;
+  })();
+
+  return promises.transactions;
 };
 
 export const addTransaction = async (tx: Transaction) => {
   tx.companyId = tx.companyId || getCurrentCompanyId();
   await setDoc(doc(db, 'transactions', tx.id), tx);
+  clearCache('transactions');
 };
 
 export const updateTransactionStatus = async (id: string, status: Transaction['status']) => {
   await updateDoc(doc(db, 'transactions', id), { status });
+  clearCache('transactions');
 };
 
 export const getInventoryStats = async () => {
@@ -216,76 +320,90 @@ export const getInventoryStats = async () => {
     };
 };
 
-export const getInventoryDetails = async () => {
-    const transactions = await getTransactions();
-    // Sort transactions chronological (oldest to newest) to correctly build FIFO queues
-    const chronologicalTxs = [...transactions].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+export const getInventoryDetails = async (): Promise<Record<string, {
+  totalAvailableQty: number; 
+  totalPhysicalQty: number;
+  locators: Record<string, { availableQty: number; physicalQty: number; earliestInbound?: string }> 
+}>> => {
+    checkCompanyChanged();
+    if (cache.inventoryDetails) return cache.inventoryDetails;
+    if (promises.inventoryDetails) return promises.inventoryDetails;
 
-    const inventory: Record<string, {
-      totalAvailableQty: number; 
-      totalPhysicalQty: number;
-      locators: Record<string, { availableQty: number; physicalQty: number; earliestInbound?: string }> 
-    }> = {};
+    promises.inventoryDetails = (async () => {
+        const transactions = await getTransactions();
+        // Sort transactions chronological (oldest to newest) to correctly build FIFO queues
+        const chronologicalTxs = [...transactions].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-    const fifoQueues: Record<string, { qty: number, timestamp: string }[]> = {};
-    
-    for (const tx of chronologicalTxs) {
-      if (tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
+        const inventory: Record<string, {
+          totalAvailableQty: number; 
+          totalPhysicalQty: number;
+          locators: Record<string, { availableQty: number; physicalQty: number; earliestInbound?: string }> 
+        }> = {};
+
+        const fifoQueues: Record<string, { qty: number, timestamp: string }[]> = {};
+        
+        for (const tx of chronologicalTxs) {
+          if (tx.status === 'CANCELLED' || tx.status === 'PENDING') continue;
+          
+          if (!inventory[tx.sku]) {
+            inventory[tx.sku] = { totalAvailableQty: 0, totalPhysicalQty: 0, locators: {} };
+          }
+          if (!inventory[tx.sku].locators[tx.locatorId]) {
+            inventory[tx.sku].locators[tx.locatorId] = { availableQty: 0, physicalQty: 0 };
+          }
+
+          const queueKey = `${tx.sku}_${tx.locatorId}`;
+          if (!fifoQueues[queueKey]) fifoQueues[queueKey] = [];
       
-      if (!inventory[tx.sku]) {
-        inventory[tx.sku] = { totalAvailableQty: 0, totalPhysicalQty: 0, locators: {} };
-      }
-      if (!inventory[tx.sku].locators[tx.locatorId]) {
-        inventory[tx.sku].locators[tx.locatorId] = { availableQty: 0, physicalQty: 0 };
-      }
+          let availableChange = tx.qty; 
+          let physicalChange = 0;
+      
+          if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {
+            physicalChange = tx.qty;
+            fifoQueues[queueKey].push({ qty: tx.qty, timestamp: tx.timestamp });
+          } else if (tx.type === 'OUTBOUND') {
+            if (tx.status === 'CONFIRMED') {
+              physicalChange = tx.qty;
+            } else if (tx.status === 'BOOKED') {
+              physicalChange = 0;
+            }
 
-      const queueKey = `${tx.sku}_${tx.locatorId}`;
-      if (!fifoQueues[queueKey]) fifoQueues[queueKey] = [];
-  
-      let availableChange = tx.qty; 
-      let physicalChange = 0;
-  
-      if (tx.type === 'INBOUND' && tx.status === 'CONFIRMED') {
-        physicalChange = tx.qty;
-        fifoQueues[queueKey].push({ qty: tx.qty, timestamp: tx.timestamp });
-      } else if (tx.type === 'OUTBOUND') {
-        if (tx.status === 'CONFIRMED') {
-          physicalChange = tx.qty;
-        } else if (tx.status === 'BOOKED') {
-          physicalChange = 0;
+            // Deduct from FIFO queue
+            let remainingToDeduct = Math.abs(tx.qty);
+            while (remainingToDeduct > 0 && fifoQueues[queueKey].length > 0) {
+              if (fifoQueues[queueKey][0].qty <= remainingToDeduct) {
+                 remainingToDeduct -= fifoQueues[queueKey][0].qty;
+                 fifoQueues[queueKey].shift();
+              } else {
+                 fifoQueues[queueKey][0].qty -= remainingToDeduct;
+                 remainingToDeduct = 0;
+              }
+            }
+          }
+      
+          inventory[tx.sku].totalAvailableQty += availableChange;
+          inventory[tx.sku].totalPhysicalQty += physicalChange;
+          
+          inventory[tx.sku].locators[tx.locatorId].availableQty += availableChange;
+          inventory[tx.sku].locators[tx.locatorId].physicalQty += physicalChange;
         }
 
-        // Deduct from FIFO queue
-        let remainingToDeduct = Math.abs(tx.qty);
-        while (remainingToDeduct > 0 && fifoQueues[queueKey].length > 0) {
-          if (fifoQueues[queueKey][0].qty <= remainingToDeduct) {
-             remainingToDeduct -= fifoQueues[queueKey][0].qty;
-             fifoQueues[queueKey].shift();
-          } else {
-             fifoQueues[queueKey][0].qty -= remainingToDeduct;
-             remainingToDeduct = 0;
+        // Assign earliest inbound date to each locator
+        for (const sku of Object.keys(inventory)) {
+          for (const locId of Object.keys(inventory[sku].locators)) {
+             const queueKey = `${sku}_${locId}`;
+             if (fifoQueues[queueKey] && fifoQueues[queueKey].length > 0) {
+               inventory[sku].locators[locId].earliestInbound = fifoQueues[queueKey][0].timestamp;
+             }
           }
         }
-      }
-  
-      inventory[tx.sku].totalAvailableQty += availableChange;
-      inventory[tx.sku].totalPhysicalQty += physicalChange;
       
-      inventory[tx.sku].locators[tx.locatorId].availableQty += availableChange;
-      inventory[tx.sku].locators[tx.locatorId].physicalQty += physicalChange;
-    }
+        cache.inventoryDetails = inventory;
+        promises.inventoryDetails = null;
+        return inventory;
+    })();
 
-    // Assign earliest inbound date to each locator
-    for (const sku of Object.keys(inventory)) {
-      for (const locId of Object.keys(inventory[sku].locators)) {
-         const queueKey = `${sku}_${locId}`;
-         if (fifoQueues[queueKey] && fifoQueues[queueKey].length > 0) {
-           inventory[sku].locators[locId].earliestInbound = fifoQueues[queueKey][0].timestamp;
-         }
-      }
-    }
-  
-    return inventory;
+    return promises.inventoryDetails;
 };
 
 export const getRackDetailsByBarcode = async (barcode: string) => {
@@ -402,6 +520,7 @@ export const transferInventory = async (sku: string, fromLocatorId: string, toLo
   });
 
   await batch.commit();
+  clearCache('transactions');
 };
 
 export const getPutawayRecommendations = async (sku: string, qty: number) => {
@@ -583,6 +702,7 @@ export const seedDatabase = async () => {
         }
 
         await batch.commit();
+        clearCache();
 
     } catch (err) {
         console.error("Failed to seed db", err);
@@ -600,26 +720,38 @@ export const savePhysicalStockCount = async (locatorId: string, sku: string, qty
       qty,
       updatedAt: serverTimestamp()
     });
+    clearCache('physicalStockCounts');
   } catch (err) {
     console.error("Error saving physical count:", err);
   }
 };
 
 export const getPhysicalStockCounts = async () => {
-  try {
-    const companyId = getCurrentCompanyId();
-    const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'physical_stock_counts'), where('companyId', '==', companyId)) : collection(db, 'physical_stock_counts');
-    const snapshot = await getDocs(q as any);
-    const counts: Record<string, number> = {};
-    snapshot.forEach(doc => {
-      const data = doc.data() as any;
-      counts[doc.id] = data.qty;
-    });
-    return counts;
-  } catch (err) {
-    console.error("Error getting physical counts:", err);
-    return {};
-  }
+  checkCompanyChanged();
+  if (cache.physicalStockCounts) return cache.physicalStockCounts;
+  if (promises.physicalStockCounts) return promises.physicalStockCounts;
+
+  promises.physicalStockCounts = (async () => {
+    try {
+      const companyId = getCurrentCompanyId();
+      const q = (!isGlobalDeveloper() && companyId) ? query(collection(db, 'physical_stock_counts'), where('companyId', '==', companyId)) : collection(db, 'physical_stock_counts');
+      const snapshot = await getDocs(q as any);
+      const counts: Record<string, number> = {};
+      snapshot.forEach(doc => {
+        const data = doc.data() as any;
+        counts[doc.id] = data.qty;
+      });
+      cache.physicalStockCounts = counts;
+      promises.physicalStockCounts = null;
+      return counts;
+    } catch (err) {
+      console.error("Error getting physical counts:", err);
+      promises.physicalStockCounts = null;
+      return {};
+    }
+  })();
+
+  return promises.physicalStockCounts;
 };
 
 export const resetStockAndTransactions = async () => {
@@ -645,5 +777,6 @@ export const resetStockAndTransactions = async () => {
       await batch.commit();
     }
   }
+  clearCache();
 };
 

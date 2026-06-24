@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Upload, Download, Edit2, Trash2, X, Save, AlertCircle, ChevronDown, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Plus, Upload, Download, Edit2, Trash2, X, Save, AlertCircle, ChevronDown, CheckCircle2, AlertTriangle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Product, ZoneCategory, Locator, Transaction } from '../types';
 import { getProducts, addProduct, updateProduct, deleteProduct as deleteProductFromDb, addProductsBatch, getTransactions, getInventoryDetails, getLocators, addProductWithStock, addProductsBatchWithStock, addTransaction } from '../lib/db';
 import { getCurrentUser } from '../lib/auth'; // Mengambil fungsi auth
@@ -22,17 +22,26 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
   const [newLocId, setNewLocId] = useState<string>('');
   const [newLocQty, setNewLocQty] = useState<string>('');
 
-  // Ambil data user aktif dan validasi hak akses khusus (Super Admin & Kepala Gudang JKT)
+  // Ambil data user aktif dan validasi hak akses khusus (Dibatasi hanya untuk Super Admin sesuai permintaan)
   const currentUser = getCurrentUser();
   const userRoleClean = currentUser?.role?.trim().toUpperCase() || '';
   
   const isSuperAdmin = userRoleClean === 'SUPER_ADMIN' || currentUser?.role?.toLowerCase() === 'super admin';
   const isKepalaGudangJkt = userRoleClean === 'KEPALA_GUDANG_JKT' || userRoleClean === 'KEPALA GUDANG JKT';
   
-  const canImportCSV = !!currentUser;
+  const canImportCSV = isSuperAdmin;
 
-  // Menggabungkan izin untuk melihat & mengeksekusi menu AKSI
-  const hasActionAccess = isSuperAdmin || isKepalaGudangJkt;
+  // Menggabungkan izin untuk melihat & mengeksekusi menu AKSI (Sekrung dibatasi HANYA untuk Super Admin)
+  const hasActionAccess = isSuperAdmin;
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(30);
+
+  // Reset page ke 1 saat filter / search berubah
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [categoryFilter, globalSearch]);
 
   const [transactions, setTransactions] = useState<any[]>([]);
 
@@ -100,6 +109,12 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
     return acc;
   }, { totalQty: 0, totalVolume: 0, totalWeight: 0 });
 
+  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+  const paginatedProducts = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredProducts.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredProducts, currentPage, itemsPerPage]);
+
   const handleSave = async () => {
     if (!formData.sku || !formData.name || !formData.category || formData.volumeM3 === undefined || formData.volumeM3 === '' || !formData.uom) {
       setMessage({ type: 'error', text: 'All fields are required.' });
@@ -109,7 +124,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
     try {
       if (editingProduct) {
         if (!hasActionAccess) {
-          setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin atau Kepala Gudang JKT yang boleh mengubah data produk.' });
+          setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin yang boleh mengubah data produk.' });
           return;
         }
 
@@ -243,7 +258,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
 
   const handleDelete = async (sku: string) => {
     if (!hasActionAccess) {
-      setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin atau Kepala Gudang JKT yang berhak menghapus data produk.' });
+      setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin yang berhak menghapus data produk.' });
       return;
     }
 
@@ -513,6 +528,10 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
         <div 
           className="p-5 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors border-b border-slate-200"
           onClick={() => {
+            if (!hasActionAccess) {
+              setMessage({ type: 'error', text: 'Akses ditolak. Hanya Super Admin yang berhak mendaftarkan produk baru.' });
+              return;
+            }
             if (!showForm || editingProduct) {
               setEditingProduct(null);
               setFormData({ sku: '', name: '', category: 'FG_PLUMBING', volumeM3: '' as any, uom: 'PCS' });
@@ -569,7 +588,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
               type="button"
               disabled
               className="flex items-center justify-center gap-1.5 px-3.5 py-2 bg-slate-100 border border-slate-200 text-slate-400 text-xs font-bold rounded-lg opacity-60 cursor-not-allowed w-full sm:w-auto"
-              title="Fitur import hanya tersedia untuk Admin A5, Super Admin, dan Developer"
+              title="Fitur import hanya tersedia untuk Super Admin"
             >
               <Upload className="w-4 h-4" />
               Import CSV (Terproteksi)
@@ -878,12 +897,28 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
         </div>
       )}
 
-      <div className="flex justify-between items-center bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-4 mt-6">
-         <h3 className="font-bold text-slate-800">Filter Overview</h3>
+      <div className="flex flex-col md:flex-row md:items-center justify-between bg-white p-5 rounded-xl border border-slate-200 shadow-sm mb-4 mt-6 gap-4">
+         <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+            <div>
+               <h3 className="font-bold text-slate-800 text-sm">Filter Overview</h3>
+               <p className="text-xs text-slate-500 mt-0.5">Saring katalog berdasarkan kategori layout</p>
+            </div>
+            <div className="flex items-center gap-3">
+               <div className="bg-blue-50 text-blue-700 px-3 py-1.5 rounded-lg border border-blue-100 text-xs font-bold flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
+                  Total SKU Produk: <strong className="font-mono text-sm">{products.length}</strong>
+               </div>
+               {filteredProducts.length !== products.length && (
+                 <div className="bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold">
+                    Terfilter: <strong className="font-mono text-sm">{filteredProducts.length}</strong>
+                  </div>
+               )}
+            </div>
+         </div>
          <select 
            value={categoryFilter} 
            onChange={e => setCategoryFilter(e.target.value)}
-           className="p-2 border border-slate-300 rounded text-sm text-slate-800 bg-slate-50 outline-none w-64"
+           className="p-2 border border-slate-300 rounded text-sm text-slate-800 bg-slate-50 outline-none w-64 focus:border-blue-500 transition-colors"
          >
            <option value="">Semua Kategori Layout</option>
            {Array.from(new Set(products.map(p => p.category))).map(cat => (
@@ -909,7 +944,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {filteredProducts.map(p => {
+            {paginatedProducts.map(p => {
               const invData = inventoryDetails[p.sku] || { totalPhysicalQty: 0, locators: {} };
               const onHandQty = invData.totalPhysicalQty;
               const weightEstimate = (p.volumeM3 * 100).toFixed(1);
@@ -950,8 +985,8 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
                      )}
                   </td>
                   <td className="px-6 py-4">
-                    <div className="text-sm font-bold text-slate-700 font-mono">{p.volumeM3} m³</div>
-                    <div className="text-xs text-slate-400 mt-0.5">{weightEstimate} Kg</div>
+                     <div className="text-sm font-bold text-slate-700 font-mono">{p.volumeM3} m³</div>
+                     <div className="text-xs text-slate-400 mt-0.5">{weightEstimate} Kg</div>
                   </td>
                   
                   {hasActionAccess && (
@@ -977,7 +1012,7 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
                 </tr>
               );
             })}
-            {filteredProducts.length === 0 && (
+            {paginatedProducts.length === 0 && (
               <tr>
                 <td colSpan={hasActionAccess ? 7 : 6} className="p-12 text-center text-slate-500 font-medium">
                   Tidak ada produk yang cocok dengan pencarian atau filter kategori.
@@ -1013,6 +1048,82 @@ export function Inventory({ globalSearch = '' }: { globalSearch?: string }) {
           )}
         </table>
         </div>
+
+        {/* Pagination Controls */}
+        {filteredProducts.length > 0 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between px-6 py-4 border-t border-slate-100 bg-slate-50/50 gap-4">
+            <div className="text-xs text-slate-500 font-medium">
+              Menampilkan <span className="font-bold text-slate-800">{Math.min(filteredProducts.length, (currentPage - 1) * itemsPerPage + 1)}-{Math.min(filteredProducts.length, currentPage * itemsPerPage)}</span> dari <span className="font-bold text-slate-800">{filteredProducts.length}</span> Kode Produk
+            </div>
+            
+            <div className="flex items-center gap-4 flex-wrap">
+              {/* Items Per Page Selector */}
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500 font-medium">Baris per halaman:</span>
+                <select
+                  value={itemsPerPage}
+                  onChange={e => {
+                    setItemsPerPage(Number(e.target.value));
+                    setCurrentPage(1);
+                  }}
+                  className="p-1.5 border border-slate-200 rounded bg-white text-xs text-slate-700 outline-none focus:border-blue-500 font-bold"
+                >
+                  <option value={30}>30</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+
+              {/* Page Buttons */}
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                  className="p-1.5 border border-slate-200 rounded bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title="Halaman Sebelumnya"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                {Array.from({ length: totalPages }, (_, i) => i + 1).map(pageNum => {
+                  // Only show current page, 1, last page, and neighbor pages to avoid overflow if there are many pages
+                  const isNear = Math.abs(pageNum - currentPage) <= 1;
+                  const isFirstOrLast = pageNum === 1 || pageNum === totalPages;
+
+                  if (!isNear && !isFirstOrLast) {
+                    if (pageNum === 2 || pageNum === totalPages - 1) {
+                      return <span key={pageNum} className="text-slate-400 px-1 text-xs">...</span>;
+                    }
+                    return null;
+                  }
+
+                  return (
+                    <button
+                      key={pageNum}
+                      onClick={() => setCurrentPage(pageNum)}
+                      className={`px-3 py-1 text-xs font-bold rounded transition-colors ${
+                        currentPage === pageNum
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {pageNum}
+                    </button>
+                  );
+                })}
+
+                <button
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                  className="p-1.5 border border-slate-200 rounded bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  title="Halaman Berikutnya"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

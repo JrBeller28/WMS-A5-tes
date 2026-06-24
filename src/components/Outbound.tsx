@@ -5,6 +5,7 @@ import { getProducts, getTransactions, addTransaction, updateTransactionStatus, 
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentUser } from '../lib/auth';
 import { QRScanner } from './QRScanner';
+import SearchableSelect from './SearchableSelect';
 
 interface LocatorType {
   id: string;
@@ -477,16 +478,18 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
                 <div>
                   <label className="block text-xs text-slate-600 mb-1 font-semibold">Kode Barang Keluar</label>
                   <div className="flex gap-2">
-                    <select 
-                      value={selectedSku} 
-                      onChange={e => setSelectedSku(e.target.value)}
-                      className="flex-1 p-2 border border-slate-300 rounded text-xs bg-white outline-none focus:border-[#0055C4] font-medium"
-                    >
-                      <option value="">-- Pilih Kode Material --</option>
-                      {(products || []).map(p => p && (
-                        <option key={p.sku} value={p.sku}>{p.sku} - {p.name}</option>
-                      ))}
-                    </select>
+                    <SearchableSelect
+                      options={(products || []).filter(Boolean).map(p => ({
+                        value: p.sku,
+                        label: p.sku,
+                        sublabel: p.name
+                      }))}
+                      value={selectedSku}
+                      onChange={setSelectedSku}
+                      placeholder="-- Pilih Kode Material --"
+                      emptyMessage="Material tidak ditemukan"
+                      focusBorderColorClass="focus-within:border-[#0055C4] focus-within:ring-1 focus-within:ring-[#0055C4]"
+                    />
                     <button 
                       onClick={() => setShowScanner(true)}
                       className="px-3 bg-blue-50 border border-blue-200 rounded text-blue-600 hover:bg-blue-100 transition-colors flex items-center justify-center shrink-0"
