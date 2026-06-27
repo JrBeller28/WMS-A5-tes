@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Save, Printer, CheckCircle, Layers, AlertTriangle, Eye, X, Zap, RefreshCw, QrCode } from 'lucide-react';
+import { Save, Printer, CheckCircle, Layers, AlertTriangle, Eye, X, Zap, RefreshCw, QrCode, Trash2 } from 'lucide-react';
 import { Product } from '../types';
-import { getProducts, getTransactions, addTransaction, updateTransactionStatus, getLocators, getInventoryDetails } from '../lib/db';
+import { getProducts, getTransactions, addTransaction, updateTransactionStatus, getLocators, getInventoryDetails, deleteTransactions } from '../lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentUser } from '../lib/auth';
 import { QRScanner } from './QRScanner';
@@ -25,6 +25,9 @@ interface ReceiptPreviewData {
 }
 
 export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
+  const currentUser = getCurrentUser();
+  const isSuperAdmin = currentUser?.role === 'Super Admin' || currentUser?.role === 'Developer';
+
   const [products, setProducts] = useState<Product[]>([]);
   const [locators, setLocators] = useState<LocatorType[]>([]);
   
@@ -63,6 +66,24 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
         setAllOutboundTransactions([]);
         setBookedTransactions([]);
     });
+  };
+
+  const handleDeleteHistorical = async (group: any) => {
+    if (!group || !group.rawItems || group.rawItems.length === 0) return;
+    
+    if (!window.confirm("Apakah Anda yakin ingin menghapus seluruh transaksi outbound ini? Tindakan ini akan mengembalikan jumlah stok barang terkait.")) {
+      return;
+    }
+    
+    try {
+      const ids = group.rawItems.map((item: any) => item.id);
+      await deleteTransactions(ids);
+      setMessage({ type: 'success', text: 'Berhasil menghapus transaksi outbound dan mengupdate stok.' });
+      refreshTransactionsData(); // Refresh the list
+    } catch (err: any) {
+      console.error(err);
+      setMessage({ type: 'error', text: 'Gagal menghapus transaksi: ' + (err.message || err) });
+    }
   };
 
   useEffect(() => {
@@ -924,12 +945,24 @@ export function Outbound({ globalSearch = '' }: { globalSearch?: string }) {
                             </span>
                           </td>
                           <td className="p-2.5 text-center">
-                            <button
-                              onClick={() => handlePreviewHistorical(group)}
-                              className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] px-2 py-1 rounded font-bold transition-colors"
-                            >
-                              Lihat Struk
-                            </button>
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                onClick={() => handlePreviewHistorical(group)}
+                                className="bg-slate-100 hover:bg-slate-200 text-slate-800 text-[10px] px-2 py-1 rounded font-bold transition-colors"
+                              >
+                                Lihat Struk
+                              </button>
+                              {isSuperAdmin && (
+                                <button
+                                  onClick={() => handleDeleteHistorical(group)}
+                                  className="inline-flex items-center gap-1 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 px-2 py-1 rounded text-[10px] font-bold border border-red-200 transition-colors"
+                                  title="Hapus Transaksi"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                  Hapus
+                                </button>
+                              )}
+                            </div>
                           </td>
                         </tr>
                       );

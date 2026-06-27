@@ -135,7 +135,7 @@ export function Layout({
   // 2. Roles: OWNER dan Developer -> Billing, User management, Settings
   if (['OWNER', 'Developer', 'Super Admin'].includes(role)) {
     tabs.push({ id: 'staff', label: 'Staff Management', icon: UserPlus });
-    if (role === 'Super Admin') {
+    if (role === 'Super Admin' || role === 'Developer') {
       tabs.push({ id: 'rack', label: 'Manajemen Rak', icon: Layers });
     }
     tabs.push({ id: 'billing', label: 'Billing & Plan', icon: CreditCard });

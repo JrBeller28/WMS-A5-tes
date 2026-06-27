@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Camera, Shield, CheckCircle2, AlertCircle, Zap, Trash2, Printer, Eye, X, QrCode } from 'lucide-react';
 import { Product, Locator, Transaction } from '../types';
-import { getProducts, getPutawayRecommendations, addTransaction, getTransactions, getInventoryDetails, getLocators, getAlowedRacksForCategory } from '../lib/db';
+import { getProducts, getPutawayRecommendations, addTransaction, getTransactions, getInventoryDetails, getLocators, getAlowedRacksForCategory, deleteTransactions } from '../lib/db';
 import { v4 as uuidv4 } from 'uuid';
 import { getCurrentUser } from '../lib/auth';
 import { QRScanner } from './QRScanner';
@@ -20,6 +20,9 @@ interface ReceiptPreviewData {
 }
 
 export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
+  const currentUser = getCurrentUser();
+  const isSuperAdmin = currentUser?.role === 'Super Admin' || currentUser?.role === 'Developer';
+
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedSku, setSelectedSku] = useState('');
   const [totalQty, setTotalQty] = useState('');
@@ -82,6 +85,29 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
       setTransactions(inbounds);
       setInventory(inv);
     }).catch(console.error);
+  };
+
+  const handleDeleteHistorical = async (txTimestamp: string) => {
+    if (!window.confirm("Apakah Anda yakin ingin menghapus seluruh batch transaksi inbound ini? Tindakan ini akan mengembalikan jumlah stok barang terkait.")) {
+      return;
+    }
+    setLoading(true);
+    try {
+      // Find all transaction IDs matching this timestamp
+      const txsToDelete = transactions.filter(t => t.timestamp === txTimestamp);
+      const ids = txsToDelete.map(t => t.id);
+      
+      if (ids.length > 0) {
+        await deleteTransactions(ids);
+        setMessage({ type: 'success', text: 'Berhasil menghapus transaksi inbound dan mengupdate stok.' });
+        fetchTransactions(); // Refresh the list & inventory
+      }
+    } catch (err: any) {
+      console.error(err);
+      setMessage({ type: 'error', text: 'Gagal menghapus transaksi: ' + (err.message || err) });
+    } finally {
+      setLoading(false);
+    }
   };
 
   const productDetails = products.find(p => p.sku === selectedSku);
@@ -860,13 +886,25 @@ export function Inbound({ globalSearch = '' }: { globalSearch?: string }) {
                         </td>
                         <td className="p-2.5 text-slate-600 uppercase text-[11px]">{tx.operator || 'SYSTEM'}</td>
                         <td className="p-2.5 text-center">
-                          <button
-                            onClick={() => handlePreviewHistorical(tx)}
-                            className="inline-flex items-center gap-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 px-2.5 py-1 rounded text-[11px] font-semibold border border-slate-200 transition-colors"
-                          >
-                            <Eye className="w-3 h-3" />
-                            Preview Struk
-                          </button>
+                          <div className="flex items-center justify-center gap-1.5">
+                            <button
+                              onClick={() => handlePreviewHistorical(tx)}
+                              className="inline-flex items-center gap-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 px-2.5 py-1 rounded text-[11px] font-semibold border border-slate-200 transition-colors"
+                            >
+                              <Eye className="w-3 h-3" />
+                              Preview Struk
+                            </button>
+                            {isSuperAdmin && (
+                              <button
+                                onClick={() => handleDeleteHistorical(tx.timestamp)}
+                                className="inline-flex items-center gap-1 bg-red-50 hover:bg-red-100 text-red-600 hover:text-red-700 px-2 py-1 rounded text-[11px] font-bold border border-red-200 transition-colors"
+                                title="Hapus Transaksi"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                                Hapus
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}

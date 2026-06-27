@@ -273,7 +273,7 @@ export function Dashboard({
         <WarehouseVisualizer />
       </div>
 
-      {user && (user.role === 'Super Admin' || user.role === 'Kepala Gudang JKT') && (
+      {user && (user.role === 'Super Admin' || user.role === 'Developer' || user.role === 'Kepala Gudang JKT') && (
         <div className="mt-12 pt-8 border-t border-slate-200">
           <AuditLog globalSearch={globalSearch} />
         </div>

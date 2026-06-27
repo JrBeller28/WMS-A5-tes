@@ -503,6 +503,42 @@ export const updateTransactionStatus = async (id: string, status: Transaction['s
   clearCache('transactions');
 };
 
+export const deleteTransactions = async (ids: string[]) => {
+  const companyId = getCurrentCompanyId();
+  if (companyId) {
+    const list = getFromLocal('local_transactions_' + companyId) || [];
+    const updated = list.filter((t: any) => !ids.includes(t.id));
+    saveToLocal('local_transactions_' + companyId, updated);
+    cache.transactions = updated;
+  }
+  
+  try {
+    let batch = writeBatch(db);
+    let count = 0;
+    for (const id of ids) {
+      batch.delete(doc(db, 'transactions', id));
+      count++;
+      if (count === 500) {
+        await batch.commit();
+        batch = writeBatch(db);
+        count = 0;
+      }
+    }
+    if (count > 0) {
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn("deleteTransactions Firestore failed, using local only", err);
+    // Fallback individual deletes in case batch fails
+    for (const id of ids) {
+      try {
+        await deleteDoc(doc(db, 'transactions', id));
+      } catch (innerErr) {}
+    }
+  }
+  clearCache('transactions');
+};
+
 export const getInventoryStats = async () => {
     const locators = await getLocators();
     const transactions = await getTransactions();

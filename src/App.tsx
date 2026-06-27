@@ -182,7 +182,7 @@ export default function App() {
       case 'staff':
         return canAccessSettings ? <StaffManagement /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'rack':
-        return role === 'Super Admin' ? <RackManagement /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
+        return (role === 'Super Admin' || role === 'Developer') ? <RackManagement /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'billing':
         return canAccessSettings ? <BillingMenu /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'superadmin':
