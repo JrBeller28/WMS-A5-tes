@@ -178,7 +178,7 @@ export default function App() {
       case 'moving':
         return canAccessOps ? <MovingRack /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'scanner':
-        return (isAdmin || isPetugas) ? <RackScanner /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
+        return <RackScanner />;
       case 'staff':
         return canAccessSettings ? <StaffManagement /> : <Dashboard globalSearch={searchQuery} onNavigate={handleTabChange} onSearchQueryChange={setSearchQuery} />;
       case 'rack':
