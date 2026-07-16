@@ -1,16 +1,52 @@
 import React, { useState } from 'react';
-import { Database, AlertTriangle, Trash2, ShieldAlert, CheckCircle, RefreshCw, Rocket } from 'lucide-react';
-import { resetStockAndTransactions } from '../lib/db';
+import { Database, AlertTriangle, Trash2, ShieldAlert, CheckCircle, RefreshCw, Rocket, Download } from 'lucide-react';
+import { resetStockAndTransactions, getTransactions, getProducts, getLocators } from '../lib/db';
 import { migrateToSaaS } from '../lib/migrateSaaS';
 
 export function DeveloperTools() {
   const [confirmPhrase, setConfirmPhrase] = useState('');
   const [loading, setLoading] = useState(false);
   const [migrating, setMigrating] = useState(false);
+  const [backupLoading, setBackupLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
   const targetPhrase = 'RESET GUDANG';
+
+  const handleBackup = async () => {
+    setBackupLoading(true);
+    setError('');
+    setSuccess('');
+    try {
+      const txs = await getTransactions();
+      const prods = await getProducts();
+      const locs = await getLocators();
+
+      const backupData = {
+        exportedAt: new Date().toISOString(),
+        version: "1.0",
+        transactions: txs,
+        products: prods,
+        locators: locs
+      };
+
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(backupData, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      const dateStr = new Date().toISOString().slice(0, 10);
+      downloadAnchor.setAttribute("download", `wms_backup_${dateStr}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+
+      setSuccess('Backup data gudang (Transaksi, Produk, dan Locator) berhasil diunduh dalam bentuk file JSON!');
+    } catch (err: any) {
+      console.error(err);
+      setError('Gagal mengekspor data backup: ' + (err.message || 'Error tidak diketahui'));
+    } finally {
+      setBackupLoading(false);
+    }
+  };
 
   const handleReset = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,8 +103,46 @@ export function DeveloperTools() {
         </p>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
-        <div className="p-6 border-b border-slate-200 flex items-start gap-3.5 bg-blue-50">
+      {error && (
+        <div className="p-3.5 bg-red-50 text-red-800 border border-red-200 text-xs font-bold rounded-lg flex items-center gap-2 animate-in fade-in-50">
+          <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
+          <span>{error}</span>
+        </div>
+      )}
+
+      {success && (
+        <div className="p-3.5 bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-lg flex items-center gap-2 animate-in fade-in-50">
+          <CheckCircle className="w-4 h-4 shrink-0 text-emerald-600" />
+          <span>{success}</span>
+        </div>
+      )}
+
+      {/* Backup Card */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-6 flex items-start gap-3.5 bg-emerald-50/75">
+          <div className="p-2.5 bg-emerald-100 text-emerald-700 rounded-lg shrink-0">
+            <Download className="w-6 h-6" />
+          </div>
+          <div className="flex-1">
+            <h3 className="text-md font-extrabold text-emerald-950 leading-snug">Backup & Ekspor Data Gudang</h3>
+            <p className="text-xs text-emerald-800 mt-1 mb-4 font-medium max-w-2xl">
+              Fasilitas untuk melakukan backup data WMS secara berkala. Tombol di bawah ini akan mengekspor seluruh data riwayat transaksi, daftar produk persediaan (stock overview), dan daftar rak fisik (locator) langsung dalam format JSON standar untuk disimpan secara aman.
+            </p>
+            <button
+               onClick={handleBackup}
+               disabled={backupLoading}
+               className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center gap-2 transition-colors cursor-pointer"
+             >
+               {backupLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+               Mulai Backup Data (JSON)
+             </button>
+          </div>
+        </div>
+      </div>
+
+      {/* SaaS Migration Card */}
+      <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="p-6 flex items-start gap-3.5 bg-blue-50">
           <div className="p-2.5 bg-blue-100 text-blue-700 rounded-lg shrink-0">
             <Rocket className="w-6 h-6" />
           </div>
@@ -80,7 +154,7 @@ export function DeveloperTools() {
             <button
                onClick={handleMigrate}
                disabled={migrating}
-               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center gap-2 transition-colors"
+               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold rounded-lg text-xs flex items-center gap-2 transition-colors cursor-pointer"
              >
                {migrating ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Rocket className="w-4 h-4" />}
                Jalankan Migrasi SaaS
@@ -89,6 +163,7 @@ export function DeveloperTools() {
         </div>
       </div>
 
+      {/* Reset Data Danger Zone Card */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         {/* Header Warning */}
         <div className="p-6 bg-red-50 border-b border-red-100 flex items-start gap-3.5">
@@ -130,20 +205,6 @@ export function DeveloperTools() {
           </div>
 
           <form onSubmit={handleReset} className="pt-4 border-t border-slate-100 max-w-lg space-y-5">
-            {error && (
-              <div className="p-3.5 bg-red-50 text-red-800 border border-red-200 text-xs font-bold rounded-lg flex items-center gap-2">
-                <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            {success && (
-              <div className="p-3.5 bg-emerald-50 text-emerald-800 border border-emerald-200 text-xs font-bold rounded-lg flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 shrink-0 text-emerald-600" />
-                <span>{success}</span>
-              </div>
-            )}
-
             <div className="space-y-2">
               <label htmlFor="confirmPhrase" className="block text-xs font-bold text-slate-700 leading-normal">
                 Ketik <span className="font-black text-red-600 select-all">RESET GUDANG</span> di bawah untuk mengaktifkan tombol:
