@@ -8,17 +8,25 @@ import {
   History, 
   Settings, 
   Bell, 
-  Search,
-  Power,
-  Scale,
-  ShieldAlert,
-  UserPlus,
-  Layers,
-  ArrowRightLeft,
-  ScanBarcode,
-  Database,
-  ClipboardList,
-  CreditCard
+  Search, 
+  Power, 
+  Scale, 
+  ShieldAlert, 
+  UserPlus, 
+  Layers, 
+  ArrowRightLeft, 
+  ScanBarcode, 
+  Database, 
+  ClipboardList, 
+  CreditCard,
+  Smartphone,
+  Monitor,
+  ChevronLeft,
+  ChevronRight,
+  Home,
+  User,
+  Boxes,
+  Camera
 } from 'lucide-react';
 import { getCurrentUser, logoutUser } from '../lib/auth';
 import { collection, query, orderBy, limit, onSnapshot, where } from 'firebase/firestore';
@@ -44,9 +52,24 @@ export function Layout({
   onSearchChange 
 }: LayoutProps) {
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [deviceView, setDeviceView] = useState<'desktop' | 'ios' | 'android'>('desktop');
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([]);
+  const [mobileProfileActive, setMobileProfileActive] = useState(false);
+  const [isStockSheetOpen, setIsStockSheetOpen] = useState(false);
+  const [isTxSheetOpen, setIsTxSheetOpen] = useState(false);
+  const [isMobileSearchExpanded, setIsMobileSearchExpanded] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const user = getCurrentUser();
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobileViewport(window.innerWidth < 1024);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
   
   useEffect(() => {
     const companyId = user?.companyId;
@@ -177,8 +200,8 @@ export function Layout({
   // Deduplicate tabs just in case a role matches multiple overlapping conditions
   tabs = tabs.filter((t, index, self) => index === self.findIndex(i => i.id === t.id));
 
-  return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
+  const mainContent = (
+    <div className={`flex ${deviceView === 'desktop' ? 'h-screen' : 'h-full'} bg-slate-50 overflow-hidden font-sans text-slate-900`}>
       {/* Mobile Drawer Backdrop */}
       {isMobileOpen && (
         <div 
@@ -281,6 +304,34 @@ export function Layout({
           </div>
           
           <div className="flex items-center gap-3 sm:gap-4 shrink-0 relative">
+            {/* Device View Switcher (Desktop Only) */}
+            <div className="hidden md:flex items-center gap-0.5 bg-slate-100 p-1 rounded-xl border border-slate-200">
+              <button
+                onClick={() => setDeviceView('desktop')}
+                className={`p-1.5 px-2.5 rounded-lg transition-all flex items-center gap-1.5 text-xs font-bold ${deviceView === 'desktop' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                title="Tampilan Desktop"
+              >
+                <Monitor className="w-3.5 h-3.5" />
+                <span className="hidden lg:inline">Desktop</span>
+              </button>
+              <button
+                onClick={() => setDeviceView('ios')}
+                className={`p-1.5 px-2.5 rounded-lg transition-all flex items-center gap-1.5 text-xs font-bold ${deviceView === 'ios' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                title="Tampilan iPhone 15"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-slate-800" />
+                <span className="hidden lg:inline">iPhone 15</span>
+              </button>
+              <button
+                onClick={() => setDeviceView('android')}
+                className={`p-1.5 px-2.5 rounded-lg transition-all flex items-center gap-1.5 text-xs font-bold ${deviceView === 'android' ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
+                title="Tampilan Galaxy S24"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="hidden lg:inline">Android</span>
+              </button>
+            </div>
+
             <button 
               onClick={() => setNotificationsOpen(!notificationsOpen)}
               className="relative p-2 text-slate-500 hover:text-blue-600 transition-colors" 
@@ -364,6 +415,654 @@ export function Layout({
           </div>
         </div>
       </main>
+    </div>
+  );
+
+  const stockOptions = [
+    { id: 'controlstock', label: 'Control Stock', icon: ClipboardList, desc: 'Pengendalian & visualizer fisik' },
+    { id: 'inventory', label: 'Master Data', icon: Box, desc: 'Registrasi SKU & info produk' },
+    { id: 'ledger', label: 'Stock Ledger', icon: History, desc: 'Jurnal & jejak log transaksi' },
+    { id: 'balance', label: 'Stock Balance', icon: Scale, desc: 'Neraca total stock & filter' }
+  ].filter(opt => tabs.some(t => t.id === opt.id));
+
+  const txOptions = [
+    { id: 'inbound', label: 'Inbound (Barang Masuk)', icon: LogIn, desc: 'Catat penerimaan & verifikasi barang masuk', bg: 'bg-emerald-500' },
+    { id: 'outbound', label: 'Outbound (Barang Keluar)', icon: LogOut, desc: 'Catat pengiriman & penarikan barang dari rak', bg: 'bg-rose-500' },
+    { id: 'moving', label: 'Moving Rack (Pindah Lokasi)', icon: ArrowRightLeft, desc: 'Pemindahan stok fisik antar bin / rak gudang', bg: 'bg-indigo-500' }
+  ].filter(opt => tabs.some(t => t.id === opt.id));
+
+  const isInsideSimulator = deviceView !== 'desktop';
+
+  const mobileContent = (
+    <div className={`w-full h-full flex flex-col bg-slate-50 relative overflow-hidden font-sans text-slate-900 ${isInsideSimulator ? 'rounded-[26px]' : 'rounded-none'}`}>
+      {/* Mobile Top Header */}
+      <div className="h-14 bg-white border-b border-slate-100 flex items-center justify-between px-5 sticky top-0 z-30 shrink-0">
+        {isMobileSearchExpanded ? (
+          <div className="flex-1 flex items-center gap-2">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input 
+                type="search" 
+                placeholder="Cari Kode, Batch, atau Rak..." 
+                autoFocus
+                value={activeSearchValue}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                className="w-full pl-9 pr-3 py-1.5 bg-slate-100 border-none rounded-xl text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all text-slate-800"
+              />
+            </div>
+            <button 
+              onClick={() => {
+                setIsMobileSearchExpanded(false);
+                handleSearchChange('');
+              }}
+              className="text-xs font-black text-blue-600 hover:text-blue-700 shrink-0 transition-colors"
+            >
+              Batal
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Header left */}
+            <div className="flex items-center gap-2.5">
+              {(mobileProfileActive || currentTab !== 'dashboard') ? (
+                <button
+                  onClick={() => {
+                    if (mobileProfileActive) {
+                      setMobileProfileActive(false);
+                      onTabChange('dashboard');
+                    } else if (['staff', 'rack', 'billing', 'developer', 'superadmin'].includes(currentTab)) {
+                      setMobileProfileActive(true);
+                    } else {
+                      onTabChange('dashboard');
+                    }
+                  }}
+                  className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-slate-50 rounded-lg border border-slate-100 transition-colors cursor-pointer flex items-center justify-center"
+                  title="Kembali"
+                >
+                  <ChevronLeft className="w-4.5 h-4.5" />
+                </button>
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-700 flex items-center justify-center font-bold text-xs shadow-inner">
+                  {user ? user.name.substring(0, 2).toUpperCase() : 'AR'}
+                </div>
+              )}
+
+              <div className="text-left">
+                {mobileProfileActive ? (
+                  <h2 className="text-sm font-black text-slate-800">Profil Operator</h2>
+                ) : currentTab === 'dashboard' ? (
+                  <div>
+                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Warehouse Operator</p>
+                    <h2 className="text-xs font-black text-slate-800 leading-none">Halo, {user ? user.name.split(' ')[0] : 'Operator'}</h2>
+                  </div>
+                ) : (
+                  <h2 className="text-xs font-black text-slate-800 uppercase tracking-wide truncate max-w-[150px]">
+                    {tabs.find(t => t.id === currentTab)?.label || 'Gudang A5'}
+                  </h2>
+                )}
+              </div>
+            </div>
+
+            {/* Header right */}
+            <div className="flex items-center gap-1">
+              {['dashboard', 'inventory', 'controlstock', 'inbound', 'outbound', 'ledger', 'balance'].includes(currentTab) && !mobileProfileActive && (
+                <button 
+                  onClick={() => setIsMobileSearchExpanded(true)}
+                  className="p-1.5 text-slate-400 hover:text-blue-600 transition-colors cursor-pointer"
+                  title="Cari"
+                >
+                  <Search className="w-4.5 h-4.5" />
+                </button>
+              )}
+
+              <button 
+                onClick={() => setNotificationsOpen(!notificationsOpen)}
+                className="relative p-1.5 text-slate-400 hover:text-blue-600 transition-colors cursor-pointer"
+                title="Notifikasi"
+              >
+                <Bell className="w-4.5 h-4.5" />
+                {recentTransactions.length > 0 && (
+                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full border border-white animate-pulse"></span>
+                )}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+
+      {/* Realtime notifications popup for mobile overlay */}
+      {notificationsOpen && (
+        <div className="absolute top-14 left-4 right-4 bg-white border border-slate-100 rounded-2xl shadow-[0_12px_24px_rgba(0,0,0,0.12)] max-h-[300px] overflow-hidden z-50 flex flex-col text-left">
+          <div className="p-3 border-b border-slate-50 bg-slate-50/80 backdrop-blur-sm flex justify-between items-center shrink-0">
+            <span className="text-xs font-extrabold text-slate-800">Ledger Realtime ({recentTransactions.length})</span>
+            <button 
+              onClick={() => setNotificationsOpen(false)}
+              className="text-[10px] font-bold text-blue-600 hover:text-blue-700 cursor-pointer"
+            >
+              Tutup
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto divide-y divide-slate-50">
+            {recentTransactions.length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-400">Tidak ada update ledger</div>
+            ) : (
+              recentTransactions.slice(0, 8).map((tx) => (
+                <div key={tx.id} className="p-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${tx.type === 'INBOUND' ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'}`}>
+                      {tx.type}
+                    </span>
+                    <span className="text-[9px] text-slate-400">{formatTime(tx.timestamp)}</span>
+                  </div>
+                  <p className="font-bold text-slate-800 mt-1">{tx.sku}</p>
+                  <p className="text-[10px] text-slate-500">Qty: {Math.abs(tx.qty)} | Bin: {tx.locatorId || 'Buffer'}</p>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Main viewport body inside Phone */}
+      <div className="flex-1 overflow-y-auto bg-slate-50">
+        {mobileProfileActive ? (
+          /* Custom Mobile Profile Screen */
+          <div className="flex flex-col h-full bg-slate-50 text-left">
+            {/* User Profile Card */}
+            <div className="p-4 bg-white border-b border-slate-100 shadow-2xs flex flex-col items-center text-center">
+              <div className="w-16 h-16 rounded-full bg-blue-50 text-blue-700 flex items-center justify-center font-black text-xl border-4 border-slate-100 shadow-sm relative">
+                {user ? user.name.substring(0, 2).toUpperCase() : 'AR'}
+                <div className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-emerald-500 rounded-full border-2 border-white"></div>
+              </div>
+              <h3 className="text-sm font-black text-slate-800 mt-2.5">{user ? user.name : 'Unknown Operator'}</h3>
+              <p className="text-[10px] text-slate-400">{user?.email || 'operator@warehouse.com'}</p>
+              
+              <span className="px-2.5 py-0.5 bg-blue-50 text-blue-700 text-[9px] font-black rounded-full border border-blue-100 mt-2 uppercase tracking-wider">
+                {user?.role || 'Operator'}
+              </span>
+              
+              <div className="w-full grid grid-cols-2 gap-4 mt-4 pt-3.5 border-t border-slate-100">
+                <div className="text-center">
+                  <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider">Warehouse</p>
+                  <p className="text-xs font-extrabold text-slate-600 mt-0.5 truncate">{user?.companyId || 'Gudang A5'}</p>
+                </div>
+                <div className="text-center border-l border-slate-100">
+                  <p className="text-[9px] text-slate-400 font-black uppercase tracking-wider">Sesi</p>
+                  <p className="text-xs font-black text-emerald-600 mt-0.5">Aktif</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Menu options list grouped */}
+            <div className="p-4 space-y-4">
+              <div className="space-y-1.5">
+                <p className="text-[9px] font-black uppercase text-slate-400 px-1 tracking-wider">Sistem & Pengaturan</p>
+                <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden divide-y divide-slate-100">
+                  {/* Staff Management */}
+                  {['OWNER', 'Developer', 'Super Admin'].includes(role) && (
+                    <button 
+                      onClick={() => {
+                        onTabChange('staff');
+                        setMobileProfileActive(false);
+                      }}
+                      className="w-full p-3.5 flex items-center justify-between text-left hover:bg-slate-50 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                          <UserPlus className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-slate-800">Staff Management</p>
+                          <p className="text-[9px] text-slate-400">Atur hak akses & operator</p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-300" />
+                    </button>
+                  )}
+
+                  {/* Manajemen Rak */}
+                  {(role === 'Super Admin' || role === 'Developer') && (
+                    <button 
+                      onClick={() => {
+                        onTabChange('rack');
+                        setMobileProfileActive(false);
+                      }}
+                      className="w-full p-3.5 flex items-center justify-between text-left hover:bg-slate-50 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-purple-50 text-purple-600 rounded-xl">
+                          <Layers className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-slate-800">Manajemen Rak</p>
+                          <p className="text-[9px] text-slate-400">Desain layout & denah fisik</p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-300" />
+                    </button>
+                  )}
+
+                  {/* Billing & Plan */}
+                  {['OWNER', 'Developer', 'Super Admin'].includes(role) && (
+                    <button 
+                      onClick={() => {
+                        onTabChange('billing');
+                        setMobileProfileActive(false);
+                      }}
+                      className="w-full p-3.5 flex items-center justify-between text-left hover:bg-slate-50 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+                          <CreditCard className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-slate-800">Billing & Plan</p>
+                          <p className="text-[9px] text-slate-400">Langganan kuota & tagihan</p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-300" />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {role === 'Developer' && (
+                <div className="space-y-1.5">
+                  <p className="text-[9px] font-black uppercase text-slate-400 px-1 tracking-wider">Developer & DB</p>
+                  <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden divide-y divide-slate-100">
+                    <button 
+                      onClick={() => {
+                        onTabChange('superadmin');
+                        setMobileProfileActive(false);
+                      }}
+                      className="w-full p-3.5 flex items-center justify-between text-left hover:bg-slate-50 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-50 text-amber-600 rounded-xl">
+                          <Database className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-slate-800">Super Admin Panel</p>
+                          <p className="text-[9px] text-slate-400">Konsol kendali data</p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-300" />
+                    </button>
+
+                    <button 
+                      onClick={() => {
+                        onTabChange('developer');
+                        setMobileProfileActive(false);
+                      }}
+                      className="w-full p-3.5 flex items-center justify-between text-left hover:bg-slate-50 transition-colors cursor-pointer"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl">
+                          <Settings className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-black text-slate-800">Developer Tools</p>
+                          <p className="text-[9px] text-slate-400">Uji coba & reset database</p>
+                        </div>
+                      </div>
+                      <ChevronRight className="w-4 h-4 text-slate-300" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Keluar */}
+              <div className="bg-white rounded-2xl border border-slate-100 overflow-hidden">
+                <button 
+                  onClick={handleLogout}
+                  className="w-full p-3.5 flex items-center justify-between text-left hover:bg-red-50 text-red-600 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-red-50 text-red-600 rounded-xl">
+                      <Power className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-black">Keluar Aplikasi (Logout)</p>
+                      <p className="text-[9px] text-red-400">Akhiri sesi operator</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-red-300" />
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* Active children page view wrapper for standard screens */
+          <div className="p-4">
+            {children}
+          </div>
+        )}
+      </div>
+
+      {/* Bottomsheets Overlay Modal for Stock */}
+      {isStockSheetOpen && (
+        <div className="absolute inset-0 z-48 flex flex-col justify-end text-left">
+          <div 
+            onClick={() => setIsStockSheetOpen(false)}
+            className="absolute inset-0 bg-slate-950/40 backdrop-blur-xs transition-opacity"
+          />
+          <div className="bg-white rounded-t-[28px] border-t border-slate-200 shadow-2xl p-5 pb-6 z-50 flex flex-col gap-4 max-w-full">
+            <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto" />
+            <div className="text-left">
+              <h3 className="text-xs font-black text-slate-800">Menu Persediaan Stock</h3>
+              <p className="text-[9px] text-slate-400">Atur barang & pantau balance pergudangan</p>
+            </div>
+            
+            {stockOptions.length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                <ShieldAlert className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="font-bold text-slate-600">Akses Terbatas</p>
+                <p className="mt-0.5 text-[9px]">Peran Anda ({role}) tidak memiliki izin akses untuk Menu Stock.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2.5 mt-1">
+                {stockOptions.map((opt) => {
+                  const IconComponent = opt.icon;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => {
+                        onTabChange(opt.id);
+                        setMobileProfileActive(false);
+                        setIsStockSheetOpen(false);
+                      }}
+                      className={`p-3 border rounded-2xl flex flex-col gap-2 text-left transition-all cursor-pointer ${
+                        currentTab === opt.id ? 'bg-blue-50/50 border-blue-200' : 'bg-slate-50 hover:bg-slate-100 border-slate-100'
+                      }`}
+                    >
+                      <div className="p-1.5 bg-blue-500 text-white rounded-xl w-8 h-8 flex items-center justify-center">
+                        <IconComponent className="w-4.5 h-4.5" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-slate-800">{opt.label}</p>
+                        <p className="text-[9px] text-slate-400 mt-0.5 leading-tight">{opt.desc}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Bottomsheets Overlay Modal for Transaksi */}
+      {isTxSheetOpen && (
+        <div className="absolute inset-0 z-48 flex flex-col justify-end text-left">
+          <div 
+            onClick={() => setIsTxSheetOpen(false)}
+            className="absolute inset-0 bg-slate-950/40 backdrop-blur-xs transition-opacity"
+          />
+          <div className="bg-white rounded-t-[28px] border-t border-slate-200 shadow-2xl p-5 pb-6 z-50 flex flex-col gap-4 max-w-full">
+            <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto" />
+            <div className="text-left">
+              <h3 className="text-xs font-black text-slate-800">Menu Transaksi Warehouse</h3>
+              <p className="text-[9px] text-slate-400">Pencatatan aktivitas keluar masuk barang & rak</p>
+            </div>
+            
+            {txOptions.length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                <ShieldAlert className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="font-bold text-slate-600">Akses Terbatas</p>
+                <p className="mt-0.5 text-[9px]">Peran Anda ({role}) tidak memiliki izin akses untuk Menu Transaksi.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-2.5 mt-1">
+                {txOptions.map((opt) => {
+                  const IconComponent = opt.icon;
+                  return (
+                    <button
+                      key={opt.id}
+                      onClick={() => {
+                        onTabChange(opt.id);
+                        setMobileProfileActive(false);
+                        setIsTxSheetOpen(false);
+                      }}
+                      className={`p-3 border rounded-2xl flex items-center gap-3 text-left transition-all cursor-pointer ${
+                        currentTab === opt.id ? 'bg-blue-50/50 border-blue-200' : 'bg-slate-50 hover:bg-slate-100 border-slate-100'
+                      }`}
+                    >
+                      <div className={`p-2 ${opt.bg} text-white rounded-xl`}>
+                        <IconComponent className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-slate-800">{opt.label}</p>
+                        <p className="text-[9px] text-slate-400 mt-0.5">{opt.desc}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Floating Bottom Navigation Bar */}
+      <div className="h-16 bg-white border-t border-slate-200/80 px-2 flex items-center justify-between shrink-0 relative z-40 pb-safe shadow-[0_-4px_16px_rgba(0,0,0,0.03)] rounded-b-[26px]">
+        {/* Slot 1: Beranda */}
+        <button 
+          onClick={() => {
+            onTabChange('dashboard');
+            setMobileProfileActive(false);
+            setIsStockSheetOpen(false);
+            setIsTxSheetOpen(false);
+          }} 
+          className={`flex flex-col items-center justify-center flex-1 py-1.5 transition-all duration-150 cursor-pointer ${
+            !mobileProfileActive && currentTab === 'dashboard'
+              ? 'text-blue-600 font-extrabold scale-102'
+              : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <Home className="w-5 h-5" />
+          <span className="text-[9px] font-bold mt-1">Beranda</span>
+        </button>
+
+        {/* Slot 2: Stock */}
+        <button 
+          onClick={() => {
+            setIsStockSheetOpen(!isStockSheetOpen);
+            setIsTxSheetOpen(false);
+          }} 
+          className={`flex flex-col items-center justify-center flex-1 py-1.5 transition-all duration-150 cursor-pointer ${
+            !mobileProfileActive && ['controlstock', 'inventory', 'ledger', 'balance'].includes(currentTab)
+              ? 'text-blue-600 font-extrabold scale-102'
+              : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <Boxes className="w-5 h-5" />
+          <span className="text-[9px] font-bold mt-1">Stock</span>
+        </button>
+
+        {/* Slot 3: Center Scanner Camera Button */}
+        <div className="flex-1 flex flex-col items-center justify-center relative -top-3.5">
+          <button 
+            onClick={() => {
+              onTabChange('scanner');
+              setMobileProfileActive(false);
+              setIsStockSheetOpen(false);
+              setIsTxSheetOpen(false);
+            }}
+            className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-transform hover:scale-105 active:scale-95 cursor-pointer ${
+              !mobileProfileActive && currentTab === 'scanner'
+                ? 'bg-blue-600 text-white shadow-blue-500/45 ring-4 ring-blue-50'
+                : 'bg-emerald-600 text-white shadow-emerald-500/45 ring-4 ring-emerald-50'
+            }`}
+            title="Scan Rak"
+          >
+            <Camera className="w-5.5 h-5.5" />
+          </button>
+          <span className="text-[9px] font-bold text-slate-500 mt-1.5">Scan Rak</span>
+        </div>
+
+        {/* Slot 4: Transaksi */}
+        <button 
+          onClick={() => {
+            setIsTxSheetOpen(!isTxSheetOpen);
+            setIsStockSheetOpen(false);
+          }} 
+          className={`flex flex-col items-center justify-center flex-1 py-1.5 transition-all duration-150 cursor-pointer ${
+            !mobileProfileActive && ['inbound', 'outbound', 'moving'].includes(currentTab)
+              ? 'text-blue-600 font-extrabold scale-102'
+              : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <ArrowRightLeft className="w-5 h-5" />
+          <span className="text-[9px] font-bold mt-1">Transaksi</span>
+        </button>
+
+        {/* Slot 5: Profil */}
+        <button 
+          onClick={() => {
+            setMobileProfileActive(true);
+            setIsStockSheetOpen(false);
+            setIsTxSheetOpen(false);
+          }} 
+          className={`flex flex-col items-center justify-center flex-1 py-1.5 transition-all duration-150 cursor-pointer ${
+            mobileProfileActive || ['staff', 'rack', 'billing', 'developer', 'superadmin'].includes(currentTab)
+              ? 'text-blue-600 font-extrabold scale-102'
+              : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <User className="w-5 h-5" />
+          <span className="text-[9px] font-bold mt-1">Profil</span>
+        </button>
+      </div>
+    </div>
+  );
+
+  if (deviceView === 'desktop') {
+    if (isMobileViewport) {
+      return (
+        <div className="w-screen h-screen flex flex-col bg-slate-50 relative overflow-hidden font-sans text-slate-950">
+          <div className="flex-1 bg-slate-50 relative overflow-hidden flex flex-col">
+            {mobileContent}
+          </div>
+        </div>
+      );
+    }
+    return mainContent;
+  }
+
+  const isIOS = deviceView === 'ios';
+
+  return (
+    <div className="w-screen h-screen bg-slate-950 flex flex-col items-center justify-center relative overflow-hidden select-none font-sans text-slate-200">
+      {/* Interactive Grid pattern background */}
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:4rem_4rem] [mask-image:radial-gradient(ellipse_60%_50%_at_50%_50%,#000_70%,transparent_100%)] opacity-35"></div>
+      
+      {/* Subtle radial light leak */}
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-blue-500/10 rounded-full blur-[120px] pointer-events-none"></div>
+
+      {/* Simulator Control Header */}
+      <div className="z-40 flex items-center justify-between w-full max-w-4xl px-6 py-3 bg-slate-900/95 border border-slate-800 backdrop-blur-md rounded-2xl absolute top-4 shadow-[0_15px_35px_rgba(0,0,0,0.6)]">
+        <div className="flex items-center gap-3">
+          <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse"></div>
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-black tracking-wider text-slate-100 uppercase">WMS Mobile Simulator</span>
+              <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[9px] rounded-full border border-blue-500/20 font-bold uppercase">Ready</span>
+            </div>
+            <p className="text-[10px] text-slate-400 font-medium">Simulasi perangkat mobile untuk kemudahan scan barcode</p>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            <button
+              onClick={() => setDeviceView('desktop')}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold text-slate-400 hover:text-white transition-all flex items-center gap-1.5 hover:bg-slate-900 cursor-pointer"
+            >
+              <Monitor className="w-3.5 h-3.5" />
+              Desktop
+            </button>
+            <button
+              onClick={() => setDeviceView('ios')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${isIOS ? 'bg-blue-600 text-white shadow-md font-extrabold' : 'text-slate-400 hover:text-white hover:bg-slate-900'}`}
+            >
+              <Smartphone className="w-3.5 h-3.5 text-slate-100" />
+              iPhone 15
+            </button>
+            <button
+              onClick={() => setDeviceView('android')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${!isIOS ? 'bg-emerald-600 text-white shadow-md font-extrabold' : 'text-slate-400 hover:text-white hover:bg-slate-900'}`}
+            >
+              <Smartphone className="w-3.5 h-3.5 text-slate-100" />
+              Android
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Simulator Frame Wrapper */}
+      <div className="relative mt-20 transition-all duration-300 transform scale-[0.88] sm:scale-100 shrink-0">
+        {/* Hardware buttons */}
+        <div className="absolute -left-1.5 top-28 w-1.5 h-10 bg-slate-800 rounded-l-md border-y border-slate-700"></div>
+        <div className="absolute -left-1.5 top-44 w-1.5 h-14 bg-slate-800 rounded-l-md border-y border-slate-700"></div>
+        <div className="absolute -left-1.5 top-60 w-1.5 h-14 bg-slate-800 rounded-l-md border-y border-slate-700"></div>
+        <div className="absolute -right-1.5 top-36 w-1.5 h-20 bg-slate-800 rounded-r-md border-y border-slate-700"></div>
+
+        {/* Outer Phone Bezel */}
+        <div className={`relative w-[385px] h-[785px] p-3 bg-slate-950 border-[6px] border-slate-800 shadow-[0_30px_70px_rgba(0,0,0,0.85)] flex flex-col overflow-hidden ${isIOS ? 'rounded-[52px]' : 'rounded-[38px]'}`}>
+          
+          {/* Dynamic Island or Punch Hole camera */}
+          {isIOS ? (
+            <div className="absolute top-5 left-1/2 -translate-x-1/2 w-28 h-6 bg-slate-950 rounded-full z-50 flex items-center justify-between px-3.5 border border-slate-800/10">
+              <div className="w-2.5 h-2.5 rounded-full bg-blue-950 border border-blue-900/30"></div>
+              <div className="w-2 h-2 rounded-full bg-slate-900"></div>
+            </div>
+          ) : (
+            <div className="absolute top-5.5 left-1/2 -translate-x-1/2 w-4 h-4 bg-slate-950 rounded-full z-50 border border-slate-900"></div>
+          )}
+
+          {/* Simulated Mobile Status Bar (Clock, Wifi, Battery) */}
+          <div className="h-9 flex justify-between items-center px-6 text-[10.5px] font-extrabold text-slate-800 select-none z-45 bg-white shrink-0 relative border-b border-slate-100 rounded-t-[28px]">
+            <div className="pl-1">
+              {new Date().toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', hour12: false })}
+            </div>
+            <div className="flex items-center gap-2 pr-1">
+              {/* Cellular Signal Icon */}
+              <svg className="w-3 h-3 text-slate-700" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M2 22h20V2z" />
+              </svg>
+              {/* Wifi Icon */}
+              <svg className="w-3.5 h-3.5 text-slate-700" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 21l-12-12c5.05-5.05 13.95-5.05 19 0l-7 12z" />
+              </svg>
+              {/* Battery Icon */}
+              <div className="w-[18px] h-2.5 border border-slate-700 rounded-sm p-0.5 flex items-center shrink-0">
+                <div className="bg-slate-800 h-full w-[85%] rounded-2xs"></div>
+              </div>
+            </div>
+          </div>
+
+          {/* Simulated App Frame Body */}
+          <div className="flex-1 bg-slate-50 relative overflow-hidden rounded-[26px] flex flex-col border border-slate-200">
+            <div className="absolute inset-0 flex flex-col">
+              {mobileContent}
+            </div>
+          </div>
+
+          {/* Home Indicator Gesture Line or Android Buttons */}
+          <div className="h-5 flex items-center justify-center shrink-0 bg-white z-45 relative rounded-b-[28px] border-t border-slate-50">
+            {isIOS ? (
+              <div className="w-28 h-1 bg-slate-900 rounded-full mb-1"></div>
+            ) : (
+              <div className="flex gap-12 items-center justify-center mb-1 text-slate-800">
+                <div className="w-3 h-3 border-2 border-slate-700 rounded-xs"></div>
+                <div className="w-3 h-3 rounded-full border-2 border-slate-700"></div>
+                <div className="w-3.5 h-3 border-t-2 border-l-2 border-slate-700 transform -rotate-45"></div>
+              </div>
+            )}
+          </div>
+
+        </div>
+      </div>
     </div>
   );
 }
