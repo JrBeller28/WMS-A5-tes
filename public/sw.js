@@ -1,17 +1,31 @@
-const CACHE_NAME = 'gudang-psn-wms-v1';
+const CACHE_NAME = 'gudang-psn-wms-v3';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/logo_a5.jpg',
+  '/wms.png',
   '/icon-192.png',
   '/icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+      return Promise.all(
+        ASSETS_TO_CACHE.map((url) => {
+          return fetch(url)
+            .then((res) => {
+              if (res.ok) {
+                return cache.put(url, res);
+              }
+              console.warn('Failed to cache resource (bad response):', url);
+            })
+            .catch((err) => {
+              console.warn('Failed to cache resource (network error):', url, err);
+            });
+        })
+      );
     })
   );
 });
@@ -26,24 +40,45 @@ self.addEventListener('activate', (event) => {
           }
         })
       );
-    })
+    }).then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', (event) => {
-  // Let the browser handle standard non-GET requests or firebase calls normally
   if (event.request.method !== 'GET') return;
-  if (event.request.url.includes('/api/') || event.request.url.includes('firestore')) return;
+  
+  const url = event.request.url;
+  // Let the browser handle standard non-GET requests, api calls, firestore, and development files
+  if (
+    url.includes('/api/') || 
+    url.includes('firestore.googleapis.com') || 
+    url.includes('@vite') || 
+    url.includes('node_modules') ||
+    url.includes('/src/') ||
+    url.includes('vitest') ||
+    url.includes('__vite_ping')
+  ) {
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
         return cachedResponse;
       }
-      return fetch(event.request).catch(() => {
-        // Fallback for offline mode if failed to fetch
+      return fetch(event.request).then((networkResponse) => {
+        // Cache newly requested static assets on the fly
+        if (networkResponse && networkResponse.status === 200) {
+          const responseToCache = networkResponse.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseToCache);
+          });
+        }
+        return networkResponse;
+      }).catch(() => {
         return caches.match('/');
       });
     })
   );
 });
+
