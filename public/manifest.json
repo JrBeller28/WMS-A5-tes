@@ -2,6 +2,8 @@
   "short_name": "Gudang PSN",
   "name": "Warehouse Management System - Gudang PSN",
   "description": "Sistem Manajemen Gudang Pintar PSN - Monitor Stok, Inbound, Outbound, dan Rak.",
+  "id": "/",
+  "scope": "/",
   "icons": [
     {
       "src": "/icon-192.png",
