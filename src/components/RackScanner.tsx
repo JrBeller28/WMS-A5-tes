@@ -15,9 +15,19 @@ export function RackScanner() {
   const [showSuccessFlash, setShowSuccessFlash] = useState<boolean>(false);
   const [confirmingLocId, setConfirmingLocId] = useState<string | null>(null);
   const [confirmedStatus, setConfirmedStatus] = useState<boolean>(false);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
   
   const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
   const user = getCurrentUser();
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 1024);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   const handleQtyChange = (idx: number, newQty: number) => {
     if (newQty < 0) return;
@@ -206,97 +216,126 @@ export function RackScanner() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col relative">
-          <div className="p-4 bg-slate-50 border-b border-slate-200">
-            <h3 className="font-bold text-slate-700 flex items-center gap-2">
-              <ScanBarcode className="w-4 h-4 text-slate-500" /> Camera Preview
-            </h3>
-          </div>
-          <div className="p-4 flex-1 flex flex-col items-center justify-center min-h-[300px]">
-            {scannerActive ? (
-              <div id="rack-scanner-region" className="w-full"></div>
-            ) : (
-              <div className="text-center">
-                <button 
-                  onClick={resetScanner}
-                  className="mx-auto flex flex-col items-center justify-center w-32 h-32 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors border border-blue-200 cursor-pointer shadow-sm"
-                >
-                  <RefreshCw className="w-8 h-8 mb-2" />
-                  <span className="font-bold text-sm">Scan Ulang</span>
-                </button>
-              </div>
-            )}
-          </div>
-          
-          <AnimatePresence>
-            {showSuccessFlash && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: [0, 1, 1, 0] }}
-                exit={{ opacity: 0 }}
-                transition={{ duration: 0.9, times: [0, 0.15, 0.8, 1] }}
-                className="absolute inset-0 bg-emerald-500/15 flex items-center justify-center pointer-events-none z-40"
-              >
-                <div className="absolute inset-0 border-8 border-emerald-500 animate-pulse" />
+      <div className={isMobile ? "space-y-4" : "grid grid-cols-1 md:grid-cols-2 gap-6"}>
+        {(!isMobile || scannerActive) && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col relative">
+            <div className="p-4 bg-slate-50 border-b border-slate-200">
+              <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                <ScanBarcode className="w-4 h-4 text-slate-500" /> Camera Preview
+              </h3>
+            </div>
+            <div className="p-4 flex-1 flex flex-col items-center justify-center min-h-[300px]">
+              {scannerActive ? (
+                <div id="rack-scanner-region" className="w-full"></div>
+              ) : (
+                <div className="text-center">
+                  <button 
+                    onClick={resetScanner}
+                    className="mx-auto flex flex-col items-center justify-center w-32 h-32 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-600 transition-colors border border-blue-200 cursor-pointer shadow-sm"
+                  >
+                    <RefreshCw className="w-8 h-8 mb-2" />
+                    <span className="font-bold text-sm">Scan Ulang</span>
+                  </button>
+                </div>
+              )}
+            </div>
+            
+            <AnimatePresence>
+              {showSuccessFlash && (
                 <motion.div
-                  initial={{ scale: 0.4, opacity: 0 }}
-                  animate={{ scale: [0.4, 1.2, 1], opacity: 1 }}
-                  transition={{ duration: 0.4 }}
-                  className="bg-emerald-500 text-white rounded-full p-4 shadow-lg shadow-emerald-500/30 flex items-center justify-center"
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: [0, 1, 1, 0] }}
+                  exit={{ opacity: 0 }}
+                  transition={{ duration: 0.9, times: [0, 0.15, 0.8, 1] }}
+                  className="absolute inset-0 bg-emerald-500/15 flex items-center justify-center pointer-events-none z-40"
                 >
-                  <CheckCircle2 className="w-12 h-12" />
+                  <div className="absolute inset-0 border-8 border-emerald-500 animate-pulse" />
+                  <motion.div
+                    initial={{ scale: 0.4, opacity: 0 }}
+                    animate={{ scale: [0.4, 1.2, 1], opacity: 1 }}
+                    transition={{ duration: 0.4 }}
+                    className="bg-emerald-500 text-white rounded-full p-4 shadow-lg shadow-emerald-500/30 flex items-center justify-center"
+                  >
+                    <CheckCircle2 className="w-12 h-12" />
+                  </motion.div>
                 </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden relative">
-           <div className="p-4 bg-slate-50 border-b border-slate-200">
-            <h3 className="font-bold text-slate-700 flex items-center gap-2">
-              <Layers className="w-4 h-4 text-slate-500" /> Hasil Scan
-            </h3>
+              )}
+            </AnimatePresence>
           </div>
-          <div className="flex-1 p-4">
-            {loading && (
-              <div className="flex items-center justify-center h-full min-h-[300px]">
-                <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
-              </div>
-            )}
+        )}
 
-            {!loading && error && (
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="h-full min-h-[300px] flex flex-col justify-center text-center p-6 bg-red-50 rounded-xl border border-red-100"
-              >
-                <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-3" />
-                <h4 className="font-bold text-red-700 mb-1">Rack Tidak Ditemukan</h4>
-                <p className="text-red-600 text-sm">{error}</p>
-              </motion.div>
-            )}
-
-            {!loading && !scanResult && !error && (
-              <div className="h-full min-h-[300px] flex flex-col justify-center text-center p-6 text-slate-400">
-                <ScanBarcode className="w-16 h-16 mx-auto mb-3 opacity-20" />
-                <p>Arahkan kamera ke barcode rak.</p>
-              </div>
-            )}
-
-            {!loading && scanResult && scanResult.success && (
-              <motion.div 
-                initial={{ opacity: 0, y: 15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-                className="space-y-6 text-left"
-              >
-                <motion.div 
-                  initial={{ scale: 0.98, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ delay: 0.05, duration: 0.3 }}
-                  className="bg-emerald-50 rounded-xl p-4 border border-emerald-200 shadow-sm relative overflow-hidden"
+        {(!isMobile || !scannerActive) && (
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden relative">
+            <div className="p-4 bg-slate-50 border-b border-slate-200 flex justify-between items-center">
+              <h3 className="font-bold text-slate-700 flex items-center gap-2">
+                <Layers className="w-4 h-4 text-slate-500" /> Hasil Scan
+              </h3>
+              {isMobile && !loading && (scanResult || error) && (
+                <button
+                  onClick={resetScanner}
+                  className="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold rounded-lg border border-blue-100 transition-colors flex items-center gap-1 cursor-pointer"
                 >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Scan Baru</span>
+                </button>
+              )}
+            </div>
+            <div className="flex-1 p-4">
+              {loading && (
+                <div className="flex items-center justify-center h-full min-h-[300px]">
+                  <RefreshCw className="w-8 h-8 text-blue-500 animate-spin" />
+                </div>
+              )}
+
+              {!loading && error && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="h-full min-h-[300px] flex flex-col justify-center text-center p-6 bg-red-50 rounded-xl border border-red-100"
+                >
+                  <AlertTriangle className="w-12 h-12 text-red-500 mx-auto mb-3" />
+                  <h4 className="font-bold text-red-700 mb-1">Rack Tidak Ditemukan</h4>
+                  <p className="text-red-600 text-sm mb-4">{error}</p>
+                  <button
+                    onClick={resetScanner}
+                    className="mx-auto flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg cursor-pointer transition-colors shadow-sm"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>Scan Ulang</span>
+                  </button>
+                </motion.div>
+              )}
+
+              {!loading && !scanResult && !error && (
+                <div className="h-full min-h-[300px] flex flex-col justify-center text-center p-6 text-slate-400">
+                  <ScanBarcode className="w-16 h-16 mx-auto mb-3 opacity-20" />
+                  <p>Arahkan kamera ke barcode rak.</p>
+                </div>
+              )}
+
+              {!loading && scanResult && scanResult.success && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+                  className="space-y-6 text-left"
+                >
+                  {isMobile && (
+                    <button
+                      onClick={resetScanner}
+                      className="w-full flex items-center justify-center gap-2 py-3 bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl shadow-md cursor-pointer mb-2 transition-all active:scale-98"
+                    >
+                      <ScanBarcode className="w-5 h-5" />
+                      <span>Scan Rak Lain</span>
+                    </button>
+                  )}
+
+                  <motion.div 
+                    initial={{ scale: 0.98, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ delay: 0.05, duration: 0.3 }}
+                    className="bg-emerald-50 rounded-xl p-4 border border-emerald-200 shadow-sm relative overflow-hidden"
+                  >
                   <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/5 rounded-full -mr-16 -mt-16 pointer-events-none" />
                   <div className="flex items-center justify-between mb-4 relative z-10">
                     <div className="flex items-center gap-2">
@@ -432,6 +471,7 @@ export function RackScanner() {
             )}
           </div>
         </div>
+      )}
       </div>
     </div>
   );
