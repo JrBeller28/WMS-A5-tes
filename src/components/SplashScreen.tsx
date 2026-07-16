@@ -52,7 +52,7 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
           className="relative w-28 h-28 md:w-32 md:h-32 rounded-3xl overflow-hidden shadow-2xl shadow-blue-500/20 border-2 border-slate-700 bg-white p-1.5 flex items-center justify-center mb-8"
         >
           <img
-            src="/logo_a5.jpg"
+            src="/wms.png"
             alt="Gudang A5 Logo"
             className="w-full h-full object-cover rounded-2xl"
             referrerPolicy="no-referrer"
