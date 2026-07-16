@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Html5QrcodeScanner, Html5QrcodeScanType } from 'html5-qrcode';
+import { Html5Qrcode } from 'html5-qrcode';
 import { ScanBarcode, Layers, AlertTriangle, CheckCircle2, RefreshCw, X, Box, Plus, Minus } from 'lucide-react';
 import { getRackDetailsByBarcode, savePhysicalStockCount } from '../lib/db';
 import { getCurrentUser } from '../lib/auth';
@@ -16,7 +16,7 @@ export function RackScanner() {
   const [confirmingLocId, setConfirmingLocId] = useState<string | null>(null);
   const [confirmedStatus, setConfirmedStatus] = useState<boolean>(false);
   
-  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
+  const html5QrcodeRef = useRef<Html5Qrcode | null>(null);
   const user = getCurrentUser();
 
   const handleQtyChange = (idx: number, newQty: number) => {
@@ -65,33 +65,65 @@ export function RackScanner() {
 
 
   useEffect(() => {
+    let isMounted = true;
+    let scannerInstance: Html5Qrcode | null = null;
+
     if (scannerActive) {
-      if (!scannerRef.current) {
-        scannerRef.current = new Html5QrcodeScanner(
-          "rack-scanner-region",
-          { 
-            fps: 10, 
-            qrbox: { width: 250, height: 250 },
-            supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
-            rememberLastUsedCamera: true
-          },
-          false
-        );
+      // Small timeout to ensure the DOM element "rack-scanner-region" is fully rendered and ready
+      const startTimer = setTimeout(() => {
+        if (!isMounted) return;
+        try {
+          const container = document.getElementById("rack-scanner-region");
+          if (!container) return;
 
-        scannerRef.current.render(onScanSuccess, onScanError);
-      }
-    } else {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(console.error);
-        scannerRef.current = null;
-      }
+          scannerInstance = new Html5Qrcode("rack-scanner-region");
+          html5QrcodeRef.current = scannerInstance;
+
+          scannerInstance.start(
+            { facingMode: "environment" },
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 250 }
+            },
+            (decodedText) => {
+              if (isMounted) {
+                onScanSuccess(decodedText);
+              }
+            },
+            (err) => {
+              // Ignore routine scanning errors
+            }
+          ).catch(err => {
+            console.error("Camera start failed:", err);
+          });
+        } catch (e) {
+          console.error("Failed to initialize Html5Qrcode:", e);
+        }
+      }, 300);
+
+      return () => {
+        isMounted = false;
+        clearTimeout(startTimer);
+        if (scannerInstance) {
+          if (scannerInstance.isScanning) {
+            scannerInstance.stop().then(() => {
+              try {
+                scannerInstance?.clear();
+              } catch (e) {
+                console.warn("Clear scanner after stop error:", e);
+              }
+            }).catch(e => console.warn("Stop scanner error:", e));
+          } else {
+            try {
+              scannerInstance.clear();
+            } catch (e) {
+              console.warn("Clear scanner error:", e);
+            }
+          }
+        }
+        html5QrcodeRef.current = null;
+      };
     }
-
-    return () => {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(console.error);
-      }
-    };
   }, [scannerActive]);
 
   const recordScanHistory = async (barcode: string, status: string) => {
@@ -120,6 +152,16 @@ export function RackScanner() {
     }
     
     setLoading(true);
+
+    // Stop scanning first before unmounting DOM container
+    if (html5QrcodeRef.current && html5QrcodeRef.current.isScanning) {
+      try {
+        await html5QrcodeRef.current.stop();
+      } catch (err) {
+        console.warn("Failed to stop scanner in onScanSuccess:", err);
+      }
+    }
+    
     setScannerActive(false); // turn off camera temporarilly
     try {
       const res = await getRackDetailsByBarcode(decodedText);
