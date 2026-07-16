@@ -23,6 +23,7 @@ import {
   Monitor,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Home,
   User,
   Boxes,
@@ -61,6 +62,22 @@ export function Layout({
   const [isMobileSearchExpanded, setIsMobileSearchExpanded] = useState(false);
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const user = getCurrentUser();
+
+  const [isTransaksiOpen, setIsTransaksiOpen] = useState(false);
+  const [isStockOpen, setIsStockOpen] = useState(false);
+  const [isManagementOpen, setIsManagementOpen] = useState(false);
+
+  useEffect(() => {
+    if (['inbound', 'outbound', 'moving'].includes(currentTab)) {
+      setIsTransaksiOpen(true);
+    }
+    if (['controlstock', 'ledger', 'balance'].includes(currentTab)) {
+      setIsStockOpen(true);
+    }
+    if (['staff', 'rack', 'billing'].includes(currentTab)) {
+      setIsManagementOpen(true);
+    }
+  }, [currentTab]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -200,6 +217,97 @@ export function Layout({
   // Deduplicate tabs just in case a role matches multiple overlapping conditions
   tabs = tabs.filter((t, index, self) => index === self.findIndex(i => i.id === t.id));
 
+  const visibleTabs = useMemo(() => {
+    return new Set(tabs.map(t => t.id));
+  }, [tabs]);
+
+  const renderMenuItem = (id: string, label: string, Icon: any, isSubmenu = false) => {
+    if (!visibleTabs.has(id)) return null;
+    const isActive = currentTab === id;
+    return (
+      <button
+        key={id}
+        onClick={() => {
+          onTabChange(id);
+          setIsMobileOpen(false);
+        }}
+        className={`w-full flex items-center gap-3 cursor-pointer text-sm font-medium transition-all ${
+          isSubmenu 
+            ? 'pl-12 pr-6 py-2 border-r-2 border-transparent hover:border-slate-300 hover:bg-slate-50/50 text-xs' 
+            : 'px-6 py-3 border-r-4 border-transparent hover:bg-slate-50'
+        } ${
+          isActive 
+            ? isSubmenu 
+              ? 'text-blue-700 bg-blue-50/30 font-bold border-r-2 !border-blue-600' 
+              : 'text-blue-700 border-r-4 !border-blue-700 bg-blue-50/50 font-bold' 
+            : 'text-slate-600 hover:text-blue-600'
+        }`}
+      >
+        <Icon className={`${isSubmenu ? 'w-4 h-4' : 'w-5 h-5'} ${isActive ? 'text-blue-700' : 'text-slate-400'}`} aria-hidden="true" />
+        <span className="truncate">{label}</span>
+      </button>
+    );
+  };
+
+  const renderGroupHeader = (
+    label: string, 
+    Icon: any, 
+    isOpen: boolean, 
+    setIsOpen: (val: boolean) => void, 
+    subIds: string[]
+  ) => {
+    const hasVisibleSub = subIds.some(id => visibleTabs.has(id));
+    if (!hasVisibleSub) return null;
+
+    const isAnyActive = subIds.includes(currentTab);
+
+    return (
+      <div className="flex flex-col">
+        <button
+          onClick={() => setIsOpen(!isOpen)}
+          className={`w-full flex items-center justify-between px-6 py-3 cursor-pointer text-sm font-semibold transition-all hover:bg-slate-50 ${
+            isAnyActive ? 'text-blue-700 bg-slate-50/40' : 'text-slate-700'
+          }`}
+        >
+          <div className="flex items-center gap-3">
+            <Icon className={`w-5 h-5 ${isAnyActive ? 'text-blue-700' : 'text-slate-500'}`} aria-hidden="true" />
+            <span>{label}</span>
+          </div>
+          {isOpen ? (
+            <ChevronDown className="w-4 h-4 text-slate-500" />
+          ) : (
+            <ChevronRight className="w-4 h-4 text-slate-400" />
+          )}
+        </button>
+        {isOpen && (
+          <div className="bg-slate-50/20 py-0.5 border-y border-slate-100/50 transition-all duration-200">
+            {label === 'Transaksi' && (
+              <>
+                {renderMenuItem('inbound', 'Inbound', LogIn, true)}
+                {renderMenuItem('outbound', 'Outbound', LogOut, true)}
+                {renderMenuItem('moving', 'Moving Rack', ArrowRightLeft, true)}
+              </>
+            )}
+            {label === 'Stock' && (
+              <>
+                {renderMenuItem('controlstock', 'Control Stock', ClipboardList, true)}
+                {renderMenuItem('ledger', 'Stock Ledger', History, true)}
+                {renderMenuItem('balance', 'Stock Balance', Scale, true)}
+              </>
+            )}
+            {label === 'Management' && (
+              <>
+                {renderMenuItem('staff', 'Staff Management', UserPlus, true)}
+                {renderMenuItem('rack', 'Manajemen Rak', Layers, true)}
+                {renderMenuItem('billing', 'Billing & Plan', CreditCard, true)}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const mainContent = (
     <div className={`flex ${deviceView === 'desktop' ? 'h-screen' : 'h-full'} bg-slate-50 overflow-hidden font-sans text-slate-900`}>
       {/* Mobile Drawer Backdrop */}
@@ -232,28 +340,48 @@ export function Layout({
           </button>
         </div>
         
-        <nav className="flex-1 mt-4">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = currentTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => {
-                  onTabChange(tab.id);
-                  setIsMobileOpen(false);
-                }}
-                className={`w-full flex items-center gap-3 px-6 py-3 cursor-pointer text-sm font-medium transition-colors ${
-                  isActive 
-                    ? 'text-blue-700 border-r-4 border-blue-700 bg-blue-50/50' 
-                    : 'text-slate-600 hover:text-blue-600 hover:bg-slate-50'
-                }`}
-              >
-                <Icon className={`w-5 h-5 ${isActive ? 'text-blue-700' : 'text-slate-400'}`} aria-hidden="true" />
-                {tab.label}
-              </button>
-            );
-          })}
+        <nav className="flex-1 mt-4 space-y-1 overflow-y-auto max-h-[calc(100vh-180px)]">
+          {/* Dashboard */}
+          {renderMenuItem('dashboard', 'Dashboard', LayoutDashboard)}
+
+          {/* Master Data */}
+          {renderMenuItem('inventory', 'Master Data', Box)}
+
+          {/* Group: Transaksi */}
+          {renderGroupHeader(
+            'Transaksi', 
+            ArrowRightLeft, 
+            isTransaksiOpen, 
+            setIsTransaksiOpen, 
+            ['inbound', 'outbound', 'moving']
+          )}
+
+          {/* Group: Stock */}
+          {renderGroupHeader(
+            'Stock', 
+            Boxes, 
+            isStockOpen, 
+            setIsStockOpen, 
+            ['controlstock', 'ledger', 'balance']
+          )}
+
+          {/* Group: Management */}
+          {renderGroupHeader(
+            'Management', 
+            Settings, 
+            isManagementOpen, 
+            setIsManagementOpen, 
+            ['staff', 'rack', 'billing']
+          )}
+
+          {/* Rack Scanner */}
+          {renderMenuItem('scanner', 'Rack Scanner', ScanBarcode)}
+
+          {/* Super Admin */}
+          {renderMenuItem('superadmin', 'Super Admin', Database)}
+
+          {/* Developer Tools */}
+          {renderMenuItem('developer', 'Developer Tools', Database)}
         </nav>
 
         <div className="p-4 border-t border-slate-200">
